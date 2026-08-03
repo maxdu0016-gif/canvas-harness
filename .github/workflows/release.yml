@@ -44,6 +44,9 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Full suite + browser tests + rebuild + npm publish in one job.
+    # Backstop against a wedged test/publish holding the runner open.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
