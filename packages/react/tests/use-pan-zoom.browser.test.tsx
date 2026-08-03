@@ -129,4 +129,79 @@ describe('WebKit pinch-zoom (gesture events)', () => {
     expect(store.getInteractionState().mode).toBe('zooming')
     await m.cleanup()
   })
+
+  test('gesture events defer to the touch-pinch path when two touches are active', async () => {
+    // iOS / iPadOS fire GestureEvents AND touch pointers for the same
+    // pinch. With two touches down, the gesture path must NOT also apply
+    // zoom (the pointer pinch path owns it) — otherwise zoom double-applies.
+    const store = createCanvasStore({ clientId: asClientId('test') })
+    const m = await mountCanvas(store)
+    const rect = m.wrap.getBoundingClientRect()
+    const anchor = { x: rect.left + 200, y: rect.top + 150 }
+    const startZoom = store.getCamera().z
+
+    // Synthetic pointers aren't real active pointers, so the hook's
+    // setPointerCapture (fired when the 2nd touch lands) would throw.
+    // Stub the capture API — irrelevant to what this test asserts.
+    m.wrap.setPointerCapture = () => {}
+    m.wrap.releasePointerCapture = () => {}
+    m.wrap.hasPointerCapture = () => false
+
+    const touchDown = (pointerId: number, x: number) =>
+      m.wrap.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          pointerType: 'touch',
+          pointerId,
+          clientX: rect.left + x,
+          clientY: rect.top + 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+
+    await act(async () => {
+      touchDown(1, 180)
+      touchDown(2, 220) // activeTouches.size === 2 → touch pinch owns zoom
+      m.wrap.dispatchEvent(gestureEvent('gesturestart', 1, anchor))
+      m.wrap.dispatchEvent(gestureEvent('gesturechange', 1.5, anchor))
+    })
+    await act(async () => {
+      await nextFrames()
+    })
+
+    // No touch *move* happened, so the pointer path zoomed 0; the gesture
+    // path must have deferred → camera unchanged (no double-apply).
+    expect(store.getCamera().z).toBeCloseTo(startZoom, 5)
+    await m.cleanup()
+  })
+
+  test('a gesturechange with no preceding gesturestart seeds the base without jumping', async () => {
+    // If gesturestart is missed/bailed, the first change must only seed
+    // the cumulative-scale base (no zoom), so a stale base can't snap the
+    // camera. The next change then derives a clean factor from that seed.
+    const store = createCanvasStore({ clientId: asClientId('test') })
+    const m = await mountCanvas(store)
+    const rect = m.wrap.getBoundingClientRect()
+    const anchor = { x: rect.left + 300, y: rect.top + 200 }
+    const startZoom = store.getCamera().z
+
+    await act(async () => {
+      // No gesturestart. First change (scale 1.5) seeds base = 1.5.
+      m.wrap.dispatchEvent(gestureEvent('gesturechange', 1.5, anchor))
+    })
+    await act(async () => {
+      await nextFrames()
+    })
+    expect(store.getCamera().z).toBeCloseTo(startZoom, 5) // seeded, not jumped
+
+    await act(async () => {
+      // Second change (scale 1.8) → factor 1.8 / 1.5 = 1.2.
+      m.wrap.dispatchEvent(gestureEvent('gesturechange', 1.8, anchor))
+    })
+    await act(async () => {
+      await nextFrames()
+    })
+    expect(store.getCamera().z).toBeCloseTo(startZoom * 1.2, 5)
+    await m.cleanup()
+  })
 })
