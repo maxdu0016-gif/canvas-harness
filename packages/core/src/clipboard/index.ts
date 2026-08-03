@@ -17,6 +17,19 @@ export { deserializeClipboard, isCanvasHarnessClipboard, serializeSelection } fr
 const MIME_NATIVE = 'application/x-canvas-harness+json'
 const MIME_TEXT = 'text/plain'
 
+// In-memory fallback clipboard. Guarantees intra-app copy/paste works
+// even when the system clipboard is unavailable or blocked — e.g.
+// WebKit (Safari / WKWebView), where the async `navigator.clipboard`
+// read is restricted, or a denied permission. The system clipboard
+// stays the primary channel (cross-app / cross-tab); this is the net.
+let memoryClipboard: SerializedClipboard | null = null
+
+const textFallback = (clip: SerializedClipboard): string =>
+  clip.nodes
+    .map(n => n.content ?? '')
+    .filter(s => s.length > 0)
+    .join('\n')
+
 /**
  * Copies the current selection to the system clipboard. Writes both a
  * native MIME (`application/x-canvas-harness+json`) and a `text/plain`
@@ -31,6 +44,7 @@ const MIME_TEXT = 'text/plain'
  */
 export const copy = async (store: CanvasStore): Promise<SerializedClipboard> => {
   const clip = serializeSelection(store)
+  memoryClipboard = clip
   await writeClipboard(clip)
   return clip
 }
@@ -81,7 +95,9 @@ export const paste = async (
   payload?: SerializedClipboard,
   opts?: DeserializeOptions,
 ): Promise<(NodeId | EdgeId)[] | null> => {
-  const clip = payload ?? (await readClipboard())
+  // System clipboard first (cross-app), then the in-memory fallback —
+  // so intra-app paste still works when the system read is blocked.
+  const clip = payload ?? (await readClipboard()) ?? memoryClipboard
   if (!clip) return null
   // Cursor-as-default: when the caller didn't specify positioning,
   // and the store has tracked the pointer at least once, paste at
@@ -98,13 +114,66 @@ export const paste = async (
   return ids
 }
 
+/**
+ * Copy the current selection into a `DataTransfer` — the WebKit-safe
+ * path, called from the DOM `copy`/`cut` events (which run inside the
+ * user gesture and expose a synchronous `DataTransfer`, unlike the
+ * restricted async `navigator.clipboard`). Also stashes an in-memory
+ * copy so paste works even when the system clipboard drops our payload.
+ *
+ * `<Canvas>` wires this to Cmd/Ctrl+C. Call directly only for a custom
+ * copy handler on a `copy`/`cut` event.
+ */
+export const writeSelectionToDataTransfer = (
+  store: CanvasStore,
+  data: DataTransfer,
+): SerializedClipboard => {
+  const clip = serializeSelection(store)
+  memoryClipboard = clip
+  const json = JSON.stringify(clip)
+  try {
+    // Some engines reject a custom MIME on DataTransfer; the JSON also
+    // rides in `text/plain`, so a rejection here is non-fatal.
+    data.setData(MIME_NATIVE, json)
+  } catch {
+    // Ignore — text/plain below carries the payload.
+  }
+  data.setData(MIME_TEXT, textFallback(clip) || json)
+  return clip
+}
+
+/**
+ * Read a canvas-harness payload from a `DataTransfer` (the DOM `paste`
+ * event). Prefers the native MIME, then a JSON `text/plain` payload,
+ * then the in-memory fallback (intra-app paste when the system
+ * clipboard didn't carry our data). Returns null if none match.
+ */
+export const readClipboardFromDataTransfer = (data: DataTransfer): SerializedClipboard | null => {
+  const native = data.getData(MIME_NATIVE)
+  if (native) {
+    try {
+      const parsed = JSON.parse(native)
+      if (isCanvasHarnessClipboard(parsed)) return parsed
+    } catch {
+      // Fall through to text/plain.
+    }
+  }
+  const text = data.getData(MIME_TEXT)
+  if (text?.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text)
+      if (isCanvasHarnessClipboard(parsed)) return parsed
+    } catch {
+      // Fall through to the in-memory fallback.
+    }
+  }
+  return memoryClipboard
+}
+
 const writeClipboard = async (clip: SerializedClipboard): Promise<void> => {
   if (typeof navigator === 'undefined' || !navigator.clipboard) return
   const json = JSON.stringify(clip)
-  const text = clip.nodes
-    .map(n => n.content ?? '')
-    .filter(s => s.length > 0)
-    .join('\n')
+  const text = textFallback(clip)
   // navigator.clipboard.write expects ClipboardItem; not all engines
   // support arbitrary mime types. We dual-write best-effort.
   type ClipboardItemCtor = new (data: Record<string, Blob>) => ClipboardItem
