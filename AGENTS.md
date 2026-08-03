@@ -97,5 +97,4 @@ These are behavioral traps not obvious from the code. Rendering/store internals 
   tests + browser tests + dist build**. Make all of `pnpm lint`, `pnpm typecheck`, `pnpm test` pass.
 - Release is **manual only** (`workflow_dispatch`, `release.yml` → OIDC npm publish + tag). Don't bump
   versions or tag as part of feature work.
-- **Do not add `Co-Authored-By: Claude` (or any AI attribution) trailers to commits in this repo.**
 - Don't commit unless asked; when you do and you're on `main`, branch first.
