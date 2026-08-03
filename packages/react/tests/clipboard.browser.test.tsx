@@ -2,17 +2,17 @@
  * Browser-mode tests for the DOM clipboard-event path (copy / cut /
  * paste). The library moved off keydown + async navigator.clipboard —
  * which WebKit (Safari / WKWebView) silently blocks — onto the DOM
- * clipboard events (synchronous DataTransfer inside the user gesture)
- * plus an in-memory fallback so intra-app paste survives even when the
- * system clipboard drops our payload.
+ * clipboard events (synchronous DataTransfer inside the user gesture),
+ * with a per-store in-memory fallback used ONLY when the transfer is
+ * empty (a WKWebView quirk) so it never hijacks an external paste.
  *
  * Two layers are covered:
- *   1. The core DataTransfer helpers, called directly (round-trip).
+ *   1. The core DataTransfer helpers, called directly.
  *   2. The <Canvas> event wiring, via observable store effects.
  * Note: a *synthetic* ClipboardEvent in chromium doesn't reflect writes
  * made inside the handler back to the DataTransfer we pass in, so the
- * write path is asserted through the helper (1) and the memory-fallback
- * paste (2), not by reading a dispatched event's DataTransfer.
+ * write path is asserted through the helper (1) and the empty-transfer
+ * fallback (2), not by reading a dispatched event's DataTransfer.
  */
 import {
   type CanvasStore,
@@ -79,24 +79,49 @@ describe('DataTransfer helpers (engine-agnostic clipboard I/O)', () => {
 
     const written = writeSelectionToDataTransfer(store, dt)
     expect(written.nodes).toHaveLength(1)
-    // text/plain carries human-readable node text (for pasting into
-    // non-canvas apps); the JSON payload rides in the custom MIME.
-    expect(dt.getData('text/plain')).toBe('hello')
+    // JSON rides in text/plain so intra-app paste round-trips in WebKit.
+    expect(JSON.parse(dt.getData('text/plain')).kind).toBe('canvas-harness/clipboard')
 
-    // Round-trips back to a full clip (via the custom MIME where the
-    // engine keeps it, else the in-memory fallback the write just seeded).
-    const read = readClipboardFromDataTransfer(dt)
+    const read = readClipboardFromDataTransfer(store, dt)
     expect(read?.nodes).toHaveLength(1)
     expect(read?.nodes[0]?.content).toBe('hello')
   })
 
-  test('read falls back to the in-memory clipboard on an empty transfer', () => {
+  test('an EMPTY transfer falls back to this store’s in-memory clipboard', () => {
     const store = setupStore()
     store.setSelection([asNodeId('n1')])
     writeSelectionToDataTransfer(store, new DataTransfer()) // seeds memory
-    // A later paste whose transfer carries nothing (the WKWebView case).
-    const read = readClipboardFromDataTransfer(new DataTransfer())
+    const read = readClipboardFromDataTransfer(store, new DataTransfer())
     expect(read?.nodes[0]?.content).toBe('hello')
+  })
+
+  test('external plain text is NOT hijacked by a prior copy', () => {
+    const store = setupStore()
+    store.setSelection([asNodeId('n1')])
+    writeSelectionToDataTransfer(store, new DataTransfer()) // seeds memory
+    const external = new DataTransfer()
+    external.setData('text/plain', 'copied from another app')
+    // Transfer holds real (non-canvas) content → must not return memory.
+    expect(readClipboardFromDataTransfer(store, external)).toBeNull()
+  })
+
+  test('foreign JSON is not treated as a canvas payload', () => {
+    const store = setupStore()
+    store.setSelection([asNodeId('n1')])
+    writeSelectionToDataTransfer(store, new DataTransfer()) // seeds memory
+    const external = new DataTransfer()
+    external.setData('text/plain', '{"foo":1}')
+    expect(readClipboardFromDataTransfer(store, external)).toBeNull()
+  })
+
+  test('the in-memory fallback is per-store (no cross-canvas bleed)', () => {
+    const a = setupStore()
+    a.setSelection([asNodeId('n1')])
+    const b = setupStore()
+    writeSelectionToDataTransfer(a, new DataTransfer()) // seeds A only
+    // B never copied → an empty transfer yields nothing (not A's node).
+    expect(readClipboardFromDataTransfer(b, new DataTransfer())).toBeNull()
+    expect(readClipboardFromDataTransfer(a, new DataTransfer())?.nodes).toHaveLength(1)
   })
 })
 

@@ -17,12 +17,13 @@ export { deserializeClipboard, isCanvasHarnessClipboard, serializeSelection } fr
 const MIME_NATIVE = 'application/x-canvas-harness+json'
 const MIME_TEXT = 'text/plain'
 
-// In-memory fallback clipboard. Guarantees intra-app copy/paste works
-// even when the system clipboard is unavailable or blocked — e.g.
-// WebKit (Safari / WKWebView), where the async `navigator.clipboard`
-// read is restricted, or a denied permission. The system clipboard
-// stays the primary channel (cross-app / cross-tab); this is the net.
-let memoryClipboard: SerializedClipboard | null = null
+// Per-store in-memory fallback clipboard. Used ONLY when a paste sees a
+// completely empty DataTransfer (a WKWebView quirk where the system
+// clipboard read yields nothing despite a prior in-app copy). Keyed by
+// store so independent <Canvas> instances never leak into each other,
+// and never consulted when the transfer holds real (external) content —
+// otherwise a paste of outside data would be hijacked by stale nodes.
+const memoryByStore = new WeakMap<CanvasStore, SerializedClipboard>()
 
 const textFallback = (clip: SerializedClipboard): string =>
   clip.nodes
@@ -44,7 +45,7 @@ const textFallback = (clip: SerializedClipboard): string =>
  */
 export const copy = async (store: CanvasStore): Promise<SerializedClipboard> => {
   const clip = serializeSelection(store)
-  memoryClipboard = clip
+  memoryByStore.set(store, clip)
   await writeClipboard(clip)
   return clip
 }
@@ -95,9 +96,11 @@ export const paste = async (
   payload?: SerializedClipboard,
   opts?: DeserializeOptions,
 ): Promise<(NodeId | EdgeId)[] | null> => {
-  // System clipboard first (cross-app), then the in-memory fallback —
-  // so intra-app paste still works when the system read is blocked.
-  const clip = payload ?? (await readClipboard()) ?? memoryClipboard
+  // System clipboard first (cross-app), then the per-store in-memory
+  // fallback — so intra-app paste still works when the system read is
+  // blocked. (`readClipboard` already returns null on non-canvas data,
+  // so this can't hijack a legitimate external clipboard.)
+  const clip = payload ?? (await readClipboard()) ?? memoryByStore.get(store) ?? null
   if (!clip) return null
   // Cursor-as-default: when the caller didn't specify positioning,
   // and the store has tracked the pointer at least once, paste at
@@ -129,26 +132,36 @@ export const writeSelectionToDataTransfer = (
   data: DataTransfer,
 ): SerializedClipboard => {
   const clip = serializeSelection(store)
-  memoryClipboard = clip
+  memoryByStore.set(store, clip)
   const json = JSON.stringify(clip)
   try {
-    // Some engines reject a custom MIME on DataTransfer; the JSON also
-    // rides in `text/plain`, so a rejection here is non-fatal.
+    // Custom MIME for engines that keep it (Chromium). WebKit drops it
+    // from a DataTransfer read, which is why the JSON also rides in
+    // text/plain below — the one type WebKit reliably round-trips.
     data.setData(MIME_NATIVE, json)
   } catch {
-    // Ignore — text/plain below carries the payload.
+    // Ignore — text/plain carries the payload.
   }
-  data.setData(MIME_TEXT, textFallback(clip) || json)
+  // text/plain holds the JSON (not human text) so intra-app paste
+  // round-trips in WebKit via the synchronous paste event. Trade-off:
+  // pasting a selection into a plain-text field shows JSON.
+  data.setData(MIME_TEXT, json)
   return clip
 }
 
 /**
  * Read a canvas-harness payload from a `DataTransfer` (the DOM `paste`
- * event). Prefers the native MIME, then a JSON `text/plain` payload,
- * then the in-memory fallback (intra-app paste when the system
- * clipboard didn't carry our data). Returns null if none match.
+ * event). Precedence: native MIME → JSON in text/plain → (only when the
+ * transfer is completely empty) the per-store in-memory fallback.
+ *
+ * Returns null when the transfer holds content that isn't ours (plain
+ * text, an image, foreign JSON) so an external paste is never hijacked
+ * by a previously-copied canvas selection. `store` scopes the fallback.
  */
-export const readClipboardFromDataTransfer = (data: DataTransfer): SerializedClipboard | null => {
+export const readClipboardFromDataTransfer = (
+  store: CanvasStore,
+  data: DataTransfer,
+): SerializedClipboard | null => {
   const native = data.getData(MIME_NATIVE)
   if (native) {
     try {
@@ -159,15 +172,22 @@ export const readClipboardFromDataTransfer = (data: DataTransfer): SerializedCli
     }
   }
   const text = data.getData(MIME_TEXT)
-  if (text?.trim().startsWith('{')) {
-    try {
-      const parsed = JSON.parse(text)
-      if (isCanvasHarnessClipboard(parsed)) return parsed
-    } catch {
-      // Fall through to the in-memory fallback.
+  if (text) {
+    // The transfer carries real content. Use it only if it's ours;
+    // otherwise it's an external paste — return null, don't fall back to
+    // the stale in-memory clipboard.
+    if (text.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(text)
+        if (isCanvasHarnessClipboard(parsed)) return parsed
+      } catch {
+        // Malformed JSON text — treat as external, fall through to null.
+      }
     }
+    return null
   }
-  return memoryClipboard
+  // Empty transfer (the WKWebView quirk) → last in-app copy for this store.
+  return memoryByStore.get(store) ?? null
 }
 
 const writeClipboard = async (clip: SerializedClipboard): Promise<void> => {

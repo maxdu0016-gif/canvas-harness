@@ -491,12 +491,21 @@ function CanvasSurface({
   // fire inside the user gesture and expose a synchronous DataTransfer,
   // which WebKit (Safari / WKWebView) allows — unlike the async
   // navigator.clipboard read it restricts, which is why keydown +
-  // navigator.clipboard silently no-op'd there. Skip when a text editor
-  // is focused so the native text clipboard isn't hijacked.
+  // navigator.clipboard silently no-op'd there.
+  //
+  // Listeners live on the HOST element, not window: the events only
+  // reach it when the canvas (or a child) holds focus, so an ordinary
+  // page-text copy elsewhere on the page is never hijacked. Skip when a
+  // text editor is focused so the native text clipboard still works.
   useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
     const isTextTarget = (t: EventTarget | null): boolean => {
-      const el = t as HTMLElement | null
-      return !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)
+      const node = t as HTMLElement | null
+      return (
+        !!node &&
+        (node.tagName === 'TEXTAREA' || node.tagName === 'INPUT' || node.isContentEditable)
+      )
     }
     const onCopy = (e: ClipboardEvent) => {
       if (isTextTarget(e.target) || !e.clipboardData || store.getSelection().length === 0) return
@@ -514,30 +523,38 @@ function CanvasSurface({
     }
     const onPaste = (e: ClipboardEvent) => {
       if (isTextTarget(e.target) || !e.clipboardData) return
-      const clip = readClipboardFromDataTransfer(e.clipboardData)
+      const clip = readClipboardFromDataTransfer(store, e.clipboardData)
       if (!clip) return
       e.preventDefault()
       void paste(store, clip)
     }
-    window.addEventListener('copy', onCopy)
-    window.addEventListener('cut', onCut)
-    window.addEventListener('paste', onPaste)
+    el.addEventListener('copy', onCopy)
+    el.addEventListener('cut', onCut)
+    el.addEventListener('paste', onPaste)
     return () => {
-      window.removeEventListener('copy', onCopy)
-      window.removeEventListener('cut', onCut)
-      window.removeEventListener('paste', onPaste)
+      el.removeEventListener('copy', onCopy)
+      el.removeEventListener('cut', onCut)
+      el.removeEventListener('paste', onPaste)
     }
   }, [store])
 
   // Focus the host on pointer interaction so the clipboard events above
   // reliably fire in WebKit, which won't dispatch copy/cut/paste without
-  // a focused element. Skipped while editing so the text editor keeps
-  // focus. (The host carries tabIndex + outline:none, see below.)
+  // a focused element. Skipped while editing, and when the pointer lands
+  // on an interactive control inside a custom DOM-overlay node — so we
+  // never steal focus from that node's own inputs/buttons.
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
-    const onPointerDown = () => {
+    const onPointerDown = (e: PointerEvent) => {
       if (store.getInteractionState().mode === 'editing') return
+      const t = e.target as HTMLElement | null
+      if (
+        t &&
+        t !== el &&
+        t.closest('input, textarea, select, button, a, [contenteditable="true"]')
+      )
+        return
       el.focus({ preventScroll: true })
     }
     el.addEventListener('pointerdown', onPointerDown)
