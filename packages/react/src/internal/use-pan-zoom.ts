@@ -11,6 +11,18 @@ import {
 import { useEffect, useRef } from 'react'
 
 /**
+ * Minimal shape of WebKit's non-standard `GestureEvent` (Safari /
+ * WKWebView), which isn't in the standard DOM lib types. `scale` is
+ * cumulative since the `gesturestart` that opened the gesture (where it
+ * is `1.0`), NOT a per-event delta.
+ */
+interface GestureLikeEvent extends Event {
+  readonly scale: number
+  readonly clientX: number
+  readonly clientY: number
+}
+
+/**
  * Wires up wheel zoom, middle-button / spacebar pan, and (phase 11)
  * touch pinch-zoom + two-finger pan + pointer-type write-through.
  *
@@ -172,6 +184,18 @@ export const usePanZoom = (
       rafId = requestAnimationFrame(flushPending)
     }
 
+    // Accumulate a zoom factor at a screen anchor. Shared by the wheel,
+    // touch-pinch and WebKit gesture paths so the finite/positive guard
+    // and the accumulate contract live in exactly one place. Callers own
+    // their own pulseMotion + schedule (they differ: the wheel path also
+    // pans and schedules once at the end; the touch path drives its own
+    // motion mode via pointer up/down).
+    const queueZoom = (factor: number, anchor: { x: number; y: number }): void => {
+      if (!Number.isFinite(factor) || factor <= 0) return
+      pendingZoomFactor *= factor
+      pendingZoomAnchor = anchor
+    }
+
     const isEditing = (): boolean => store.getInteractionState().mode === 'editing'
 
     const screenFromClient = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -212,8 +236,7 @@ export const usePanZoom = (
         // a 63% drop in a single click.
         const factor =
           Math.abs(e.deltaY) >= 100 ? (e.deltaY > 0 ? 1 / 1.1 : 1.1) : Math.exp(-e.deltaY * 0.01)
-        pendingZoomFactor *= factor
-        pendingZoomAnchor = screenFromClient(e.clientX, e.clientY)
+        queueZoom(factor, screenFromClient(e.clientX, e.clientY))
         pulseMotion('zooming')
       } else {
         pendingDx += -e.deltaX
@@ -289,11 +312,7 @@ export const usePanZoom = (
           const [a, b] = pts
           const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y)
           const mid = { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 }
-          const factor = dist / lastPinchDistance
-          if (Number.isFinite(factor) && factor > 0) {
-            pendingZoomFactor *= factor
-            pendingZoomAnchor = mid
-          }
+          queueZoom(dist / lastPinchDistance, mid)
           pendingDx += mid.x - lastPinchMidpoint.x
           pendingDy += mid.y - lastPinchMidpoint.y
           lastPinchDistance = dist
@@ -359,20 +378,68 @@ export const usePanZoom = (
       if (e.code === 'Space') panActivatedBySpace = false
     }
 
-    // Safari-only `gesturestart`/`gesturechange`/`gestureend` fire for
-    // native trackpad pinches *before* (and sometimes instead of) the
-    // ctrlKey-wheel variant the harness already handles. Without
-    // suppressing them the browser's default page-zoom wins. No-op on
-    // Chromium/Firefox where these events never fire.
-    const onGesture = (e: Event) => e.preventDefault()
+    // WebKit (Safari / WKWebView) encodes a trackpad pinch as
+    // `gesturestart`/`gesturechange`/`gestureend` (GestureEvent, with a
+    // cumulative `scale`) and — unlike Chromium — does NOT also emit a
+    // `ctrlKey` wheel, so the wheel branch above never sees the pinch on
+    // WebKit. Translate `scale` into the same accumulate-and-flush zoom
+    // the wheel path uses, anchored at the gesture point. All three stay
+    // `preventDefault()`'d to suppress WebKit's native page-magnification.
+    // These events never fire on Chromium/Firefox, so this is inert there.
+    //
+    // `gestureSeeded` tracks whether the current gesture has a valid
+    // base `scale` yet. It is NOT used to gate the wheel path (no engine
+    // emits both gesture events and a ctrlKey wheel for one pinch), only
+    // to keep the cumulative-scale base fresh across a start we may have
+    // missed or bailed on.
+    let gestureBaseScale = 1
+    let gestureSeeded = false
+    const onGestureStart = (e: Event) => {
+      e.preventDefault()
+      if (isEditing()) return
+      // WebKit resets `scale` to 1.0 at each gesturestart.
+      gestureBaseScale = (e as GestureLikeEvent).scale
+      gestureSeeded = true
+    }
+    const onGestureChange = (e: Event) => {
+      e.preventDefault()
+      if (isEditing()) return
+      // On touchscreen WebKit (iOS / iPadOS) a pinch fires BOTH gesture*
+      // events AND touch pointers; the pointer pinch path already owns
+      // that case, so defer to it here to avoid applying zoom twice.
+      // A trackpad pinch (desktop Safari / WKWebView) has no active
+      // touches, so this path still runs there.
+      if (activeTouches.size >= 2) return
+      const ge = e as GestureLikeEvent
+      if (!gestureSeeded) {
+        // No fresh gesturestart (missed, or bailed while editing). Seed
+        // the base from this event and wait for the next tick to derive
+        // a factor, so a stale base can't cause a spurious zoom jump.
+        gestureBaseScale = ge.scale
+        gestureSeeded = true
+        return
+      }
+      // `scale` is cumulative since gesturestart — convert to a per-event
+      // factor. Applying `scale` raw each tick double-applies and
+      // over-zooms.
+      const factor = ge.scale / gestureBaseScale
+      gestureBaseScale = ge.scale
+      queueZoom(factor, screenFromClient(ge.clientX, ge.clientY))
+      pulseMotion('zooming')
+      schedule()
+    }
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault()
+      gestureSeeded = false
+    }
     el.addEventListener('wheel', onWheel, { passive: false })
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove)
     el.addEventListener('pointerup', onPointerUp)
     el.addEventListener('pointercancel', onPointerCancel)
-    el.addEventListener('gesturestart', onGesture)
-    el.addEventListener('gesturechange', onGesture)
-    el.addEventListener('gestureend', onGesture)
+    el.addEventListener('gesturestart', onGestureStart)
+    el.addEventListener('gesturechange', onGestureChange)
+    el.addEventListener('gestureend', onGestureEnd)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     return () => {
@@ -381,9 +448,9 @@ export const usePanZoom = (
       el.removeEventListener('pointermove', onPointerMove)
       el.removeEventListener('pointerup', onPointerUp)
       el.removeEventListener('pointercancel', onPointerCancel)
-      el.removeEventListener('gesturestart', onGesture)
-      el.removeEventListener('gesturechange', onGesture)
-      el.removeEventListener('gestureend', onGesture)
+      el.removeEventListener('gesturestart', onGestureStart)
+      el.removeEventListener('gesturechange', onGestureChange)
+      el.removeEventListener('gestureend', onGestureEnd)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       // motion-end rAF poll exits on its own when motionEndPolling
