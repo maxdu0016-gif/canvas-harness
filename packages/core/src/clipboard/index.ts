@@ -96,11 +96,13 @@ export const paste = async (
   payload?: SerializedClipboard,
   opts?: DeserializeOptions,
 ): Promise<(NodeId | EdgeId)[] | null> => {
-  // System clipboard first (cross-app), then the per-store in-memory
-  // fallback — so intra-app paste still works when the system read is
-  // blocked. (`readClipboard` already returns null on non-canvas data,
-  // so this can't hijack a legitimate external clipboard.)
-  const clip = payload ?? (await readClipboard()) ?? memoryByStore.get(store) ?? null
+  // Explicit payload, else the system clipboard. Deliberately NO
+  // in-memory fallback here: readClipboard() returns null for both an
+  // empty/unavailable clipboard AND a non-canvas one, so falling back to
+  // memory would paste stale nodes over legitimate external content. The
+  // DOM paste-event path handles the WebKit empty-transfer case instead,
+  // via readClipboardFromDataTransfer (which can tell the two apart).
+  const clip = payload ?? (await readClipboard())
   if (!clip) return null
   // Cursor-as-default: when the caller didn't specify positioning,
   // and the store has tracked the pointer at least once, paste at
@@ -146,6 +148,24 @@ export const writeSelectionToDataTransfer = (
   // round-trips in WebKit via the synchronous paste event. Trade-off:
   // pasting a selection into a plain-text field shows JSON.
   data.setData(MIME_TEXT, json)
+  return clip
+}
+
+/**
+ * Cut into a `DataTransfer`: copy the selection then remove it, in one
+ * undoable batch. The DOM `cut` event path. Shares the write + removal
+ * contract with the rest of the module so the React layer doesn't
+ * re-implement it.
+ */
+export const cutSelectionToDataTransfer = (
+  store: CanvasStore,
+  data: DataTransfer,
+): SerializedClipboard => {
+  const clip = writeSelectionToDataTransfer(store, data)
+  store.batch(() => {
+    for (const n of clip.nodes) store.removeNode(n.id)
+    for (const e of clip.edges) store.removeEdge(e.id)
+  })
   return clip
 }
 

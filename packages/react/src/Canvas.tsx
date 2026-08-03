@@ -5,6 +5,7 @@ import {
   type NodeId,
   type Renderer,
   createRenderer,
+  cutSelectionToDataTransfer,
   hitTestAny,
   paste,
   readClipboardFromDataTransfer,
@@ -515,11 +516,7 @@ function CanvasSurface({
     const onCut = (e: ClipboardEvent) => {
       if (isTextTarget(e.target) || !e.clipboardData || store.getSelection().length === 0) return
       e.preventDefault()
-      const clip = writeSelectionToDataTransfer(store, e.clipboardData)
-      store.batch(() => {
-        for (const n of clip.nodes) store.removeNode(n.id)
-        for (const ed of clip.edges) store.removeEdge(ed.id)
-      })
+      cutSelectionToDataTransfer(store, e.clipboardData)
     }
     const onPaste = (e: ClipboardEvent) => {
       if (isTextTarget(e.target) || !e.clipboardData) return
@@ -549,11 +546,10 @@ function CanvasSurface({
     const onPointerDown = (e: PointerEvent) => {
       if (store.getInteractionState().mode === 'editing') return
       const t = e.target as HTMLElement | null
-      if (
-        t &&
-        t !== el &&
-        t.closest('input, textarea, select, button, a, [contenteditable="true"]')
-      )
+      // Don't steal focus from a custom overlay node's own controls.
+      // `isContentEditable` covers every contenteditable variant (bare,
+      // "true", "plaintext-only") — matching the clipboard guard above.
+      if (t && t !== el && (t.isContentEditable || t.closest('input, textarea, select, button, a')))
         return
       el.focus({ preventScroll: true })
     }
