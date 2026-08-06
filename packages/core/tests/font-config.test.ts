@@ -53,6 +53,14 @@ describe('configureFonts', () => {
     expect(getFontSizePx('M')).toBe(16) // unspecified size untouched
   })
 
+  test('ignores explicit-undefined override values (no registry poisoning)', () => {
+    // A caller building config dynamically can pass undefined; it must not
+    // overwrite a real default (which would yield NaN geometry downstream).
+    configureFonts({ size: { M: undefined }, family: { 'sans-serif': undefined } })
+    expect(getFontSizePx('M')).toBe(16)
+    expect(getFontStack('sans-serif')).toContain('Hanken Grotesk')
+  })
+
   test('bumps the font epoch so caches invalidate + canvases repaint', () => {
     const before = getFontEpoch()
     configureFonts({ family: { serif: '"Whatever", serif' } })

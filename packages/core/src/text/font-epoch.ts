@@ -39,9 +39,13 @@ export const bumpFontEpoch = (): void => {
 
 const initFontTracking = (): void => {
   if (fontTrackingInitialized) return
+  // Don't latch when there's no document (Node / pre-hydration eval) — a
+  // later call once the DOM exists must still get to attach the listeners.
+  // Matters now that measure.ts subscribes at import time, not the
+  // renderer at browser runtime.
+  if (typeof document === 'undefined' || !('fonts' in document)) return
   fontTrackingInitialized = true
 
-  if (typeof document === 'undefined' || !('fonts' in document)) return
   const fontSet = document.fonts
   let didSettleInitialFonts = false
 

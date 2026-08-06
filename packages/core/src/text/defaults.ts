@@ -62,30 +62,50 @@ export const getLineHeightPx = (size: FontSize): number => lineHeights[size]
 export type FontConfig = {
   /** Map a family token to a CSS font stack (e.g. `{ 'sans-serif': '"Hanken Grotesk", sans-serif' }`). */
   family?: Partial<Record<FontFamily, string>>
-  /** Override a size token's pixel size. Ripples through layout + auto-fit geometry. */
+  /** Override a size token's pixel size. Affects newly measured/laid-out text (see note on reflow). */
   size?: Partial<Record<FontSize, number>>
   /** Override a size token's line height (px). */
   lineHeight?: Partial<Record<FontSize, number>>
 }
 
+// Merge only *defined* override values over the base — a caller building
+// config dynamically may pass `undefined` (e.g. `{ M: cfg.customM }`),
+// which must not overwrite a real default with undefined (→ NaN geometry).
+const mergeDefined = <K extends string, V>(
+  base: Record<K, V>,
+  over: Partial<Record<K, V>>,
+): Record<K, V> => {
+  const out = { ...base }
+  for (const k of Object.keys(over) as K[]) {
+    const v = over[k]
+    if (v !== undefined) out[k] = v
+  }
+  return out
+}
+
 /**
  * Customize the fonts the canvas renders with. Partial + merges over the
  * current values, so overriding one token leaves the rest at their
- * defaults. Bumps the font epoch, so the measure + bitmap caches
- * invalidate and mounted canvases repaint.
+ * defaults (`undefined` override values are ignored, never applied).
+ * Bumps the font epoch, so the measure + bitmap caches invalidate and
+ * mounted canvases repaint.
  *
  * App-global (last call wins) — fonts are loaded document-globally, so a
- * per-canvas stack override wouldn't correspond to a real face. Call once
- * at startup, and load the actual faces yourself (@font-face / Google
- * Fonts); the library only names them.
+ * per-canvas stack override wouldn't correspond to a real face. Load the
+ * actual faces yourself (@font-face / Google Fonts); the library only
+ * names them.
+ *
+ * **Call at startup, before nodes are created/loaded.** Overrides apply
+ * to text measured/laid out *after* the call; nodes already sized in the
+ * document keep their persisted `w`/`h` — this does not reflow them.
  *
  * @example
  * configureFonts({ family: { 'sans-serif': '"Hanken Grotesk", system-ui, sans-serif' } })
  */
 export const configureFonts = (config: FontConfig): void => {
-  if (config.family) fontStacks = { ...fontStacks, ...config.family }
-  if (config.size) fontSizes = { ...fontSizes, ...config.size }
-  if (config.lineHeight) lineHeights = { ...lineHeights, ...config.lineHeight }
+  if (config.family) fontStacks = mergeDefined(fontStacks, config.family)
+  if (config.size) fontSizes = mergeDefined(fontSizes, config.size)
+  if (config.lineHeight) lineHeights = mergeDefined(lineHeights, config.lineHeight)
   bumpFontEpoch()
 }
 
