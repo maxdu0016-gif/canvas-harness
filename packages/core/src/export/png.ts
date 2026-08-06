@@ -10,7 +10,7 @@ import type { CanvasStore } from '../store'
 import {
   DEFAULT_HIGHLIGHT_COLOR,
   DEFAULT_TEXT_COLOR,
-  FONT_SIZE_MAP,
+  getFontSizePx,
   getOrRenderTextBitmap,
 } from '../text'
 import type { Edge, Node, NodeId } from '../types'
@@ -217,7 +217,7 @@ const paintContent = (ctx: CanvasRenderingContext2D, node: Node): void => {
   const style = node.style
   const fontSize = style?.fontSize ?? 'M'
   // Same readability skip as the live renderer.
-  if (FONT_SIZE_MAP[fontSize] * 1 < MIN_READABLE_FONT_PX) return
+  if (getFontSizePx(fontSize) * 1 < MIN_READABLE_FONT_PX) return
   const bitmap = getOrRenderTextBitmap({
     id: node.id,
     text: node.content,

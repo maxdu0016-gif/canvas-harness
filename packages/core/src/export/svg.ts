@@ -2,7 +2,7 @@ import { applySvgColor, extractSvgDimensions } from '../assets'
 import { computeEdgeGeometry } from '../edges'
 import { nodeAABB } from '../spatial'
 import type { CanvasStore } from '../store'
-import { FONT_FAMILY_MAP, FONT_SIZE_MAP } from '../text'
+import { getFontSizePx, getFontStack } from '../text'
 import type { Edge, IconNodeData, ImageNodeData, Node, NodeId } from '../types'
 
 /**
@@ -198,8 +198,8 @@ const renderShapeSvg = (
 
 const renderTextSvg = (node: Node): string => {
   if (!node.content || !node.content.trim()) return ''
-  const fontSize = FONT_SIZE_MAP[node.style?.fontSize ?? 'M']
-  const family = FONT_FAMILY_MAP[node.style?.fontFamily ?? 'handwriting']
+  const fontSize = getFontSizePx(node.style?.fontSize ?? 'M')
+  const family = getFontStack(node.style?.fontFamily ?? 'handwriting')
   const color = node.style?.textColor ?? '#1f2937'
   const align = node.style?.textAlign ?? 'center'
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle'

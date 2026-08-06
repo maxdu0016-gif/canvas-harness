@@ -2,8 +2,8 @@ import { seedFromId } from '../render/rough/cache'
 import { type ThemeResolver, dashPatternFor } from '../render/shapes/defaults'
 import {
   DEFAULT_TEXT_COLOR,
-  FONT_SIZE_MAP,
-  LINE_HEIGHT_MAP,
+  getFontSizePx,
+  getLineHeightPx,
   getOrRenderTextBitmap,
   measureText,
   subscribeFontEpoch,
@@ -245,7 +245,7 @@ const computeLabelDims = (edge: Edge): LabelDims | null => {
   const hit = labelDimsCache.get(cacheKey)
   if (hit) return hit
 
-  const fontPx = FONT_SIZE_MAP[fontSize]
+  const fontPx = getFontSizePx(fontSize)
   const naturalWidth = measureText({
     text: content,
     type: 'text',
@@ -255,7 +255,7 @@ const computeLabelDims = (edge: Edge): LabelDims | null => {
   })
   const width = Math.min(LABEL_MAX_WIDTH_PX, Math.max(20, naturalWidth + LABEL_PADDING_X * 2))
   const lines = Math.max(1, Math.ceil(naturalWidth / Math.max(1, width - LABEL_PADDING_X * 2)))
-  const height = lines * LINE_HEIGHT_MAP[fontSize] + LABEL_PADDING_Y * 2
+  const height = lines * getLineHeightPx(fontSize) + LABEL_PADDING_Y * 2
   const dims: LabelDims = { width, height, fontPx }
   if (labelDimsCache.size >= LABEL_DIMS_CACHE_MAX) labelDimsCache.clear()
   labelDimsCache.set(cacheKey, dims)
@@ -298,7 +298,7 @@ const drawEdgeLabel = (
 ): void => {
   const style = edge.style
   const fontSize = style?.fontSize ?? 'M'
-  if (FONT_SIZE_MAP[fontSize] * scale < LABEL_MIN_READABLE_FONT_PX) return
+  if (getFontSizePx(fontSize) * scale < LABEL_MIN_READABLE_FONT_PX) return
 
   const dims = computeLabelDims(edge)
   if (!dims) return

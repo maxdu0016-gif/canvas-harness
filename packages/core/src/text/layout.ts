@@ -10,7 +10,7 @@ import type { FontFamily, FontSize, TextStyle } from '../types'
  * fit precisely. Text lines wrap by word, falling back to char-wrap
  * for words longer than `width`.
  */
-import { CODE_BLOCK_PADDING_X, DEFAULT_TEXT_COLOR, FONT_SIZE_MAP } from './defaults'
+import { CODE_BLOCK_PADDING_X, DEFAULT_TEXT_COLOR, getFontSizePx } from './defaults'
 import { getMathBitmap } from './math'
 import { measureText } from './measure'
 import type { InlineType, Token } from './tokens'
@@ -190,7 +190,7 @@ export const layoutTokens = (tokens: Token[], opts: LayoutOptions): LayoutLine[]
     cursorX += chunkWidth
   }
 
-  const fontSizePx = FONT_SIZE_MAP[opts.fontSize]
+  const fontSizePx = getFontSizePx(opts.fontSize)
   // Must match paint-canvas's fallback so the math cache lookup keys
   // align between layout (measuring) and paint (drawing). The cache
   // is keyed by (source, color, size); a mismatch means paint never

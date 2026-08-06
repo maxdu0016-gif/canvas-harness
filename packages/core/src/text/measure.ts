@@ -9,7 +9,8 @@ import type { FontFamily, FontSize, TextStyle } from '../types'
  * Cache is module-level so multiple Canvas instances share it. Eviction is
  * FIFO via Map iteration order (Maps preserve insertion order in JS).
  */
-import { DEFAULT_TEXT_COLOR, FONT_FAMILY_MAP, FONT_SIZE_MAP } from './defaults'
+import { DEFAULT_TEXT_COLOR, getFontSizePx, getFontStack } from './defaults'
+import { subscribeFontEpoch } from './font-epoch'
 import { getMathBitmap } from './math'
 import type { InlineType } from './tokens'
 
@@ -33,8 +34,8 @@ export const getCanvasFont = (opts: {
 }): string => {
   const weight = opts.type === 'bold' || opts.textStyle === 'bold' ? '700' : '400'
   const italic = opts.type === 'italic' || opts.textStyle === 'italic' ? 'italic' : 'normal'
-  const family = opts.type === 'code' ? FONT_FAMILY_MAP.monospace : FONT_FAMILY_MAP[opts.fontFamily]
-  return `${italic} ${weight} ${FONT_SIZE_MAP[opts.fontSize]}px ${family}`
+  const family = opts.type === 'code' ? getFontStack('monospace') : getFontStack(opts.fontFamily)
+  return `${italic} ${weight} ${getFontSizePx(opts.fontSize)}px ${family}`
 }
 
 /**
@@ -57,7 +58,7 @@ export const measureText = (opts: {
   // DEFAULT_TEXT_COLOR). Mismatch here = paint never finds the
   // bitmap layout compiled.
   if (opts.type === 'math') {
-    const fontSizePx = FONT_SIZE_MAP[opts.fontSize]
+    const fontSizePx = getFontSizePx(opts.fontSize)
     const bitmap = getMathBitmap(opts.text, DEFAULT_TEXT_COLOR, fontSizePx)
     if (bitmap) return bitmap.width
     return Math.max(8, opts.text.length * fontSizePx * 0.55 + fontSizePx)
@@ -68,7 +69,7 @@ export const measureText = (opts: {
   if (cached !== undefined) return cached
 
   if (!measureCtx) {
-    return opts.text.length * FONT_SIZE_MAP[opts.fontSize] * 0.55
+    return opts.text.length * getFontSizePx(opts.fontSize) * 0.55
   }
 
   measureCtx.font = font
@@ -89,3 +90,9 @@ export const measureText = (opts: {
 export const clearMeasureCache = (): void => {
   widthCache.clear()
 }
+
+// Clear cached widths whenever the font epoch bumps — fonts settling (or
+// configureFonts changing a stack/size) makes the memoized metrics stale.
+// Pull-based (measure subscribes) so font-epoch stays a dependency-free
+// leaf and the font registry can bump it without an import cycle.
+subscribeFontEpoch(clearMeasureCache)
