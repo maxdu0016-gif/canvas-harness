@@ -17,7 +17,7 @@ import type { FontFamily, FontSize } from '../types'
 export const FONT_FAMILY_MAP: Record<FontFamily, string> = {
   handwriting: '"Architects Daughter", cursive',
   'sans-serif':
-    '"Atkinson Hyperlegible Next", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", ui-sans-serif, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+    '"Hanken Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", ui-sans-serif, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
   serif: '"Lora", "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
   monospace:
     '"Inconsolata", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
