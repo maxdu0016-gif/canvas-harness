@@ -250,7 +250,7 @@ Override any stack — or the per-token sizes / line-heights — with `configure
 import { configureFonts } from '@canvas-harness/core'
 
 configureFonts({
-  family: { 'sans-serif': '"Hanken Grotesk", system-ui, sans-serif' },
+  family: { 'sans-serif': '"Inter", system-ui, sans-serif' },
   size: { L: 26 },        // optional — per size token: S / M / L / XL
   lineHeight: { L: 34 },  // optional
 })
