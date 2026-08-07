@@ -117,7 +117,7 @@ export const resetFonts = (): void => {
   bumpFontEpoch()
 }
 
-// Layout-time visual constants. Match dim0 canvas-lite-markdown.
+// Layout-time visual constants. Match dim0's canvas-lite-markdown.
 export const CODE_BLOCK_PADDING_X = 6
 export const CODE_BLOCK_MARGIN_Y = 4
 export const CONTENT_HEIGHT_BUFFER = 4
