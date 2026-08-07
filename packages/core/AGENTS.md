@@ -27,7 +27,8 @@ Siblings: `interaction.ts`, `presence.ts`, `conflict.ts`, `inverse-op.ts`, `sync
 
 **Public API:** `createCanvasStore` (`store/store.ts:117`); `addNode`/`updateNode`/`removeNode`/`addEdge`/
 `addImage`/`addSvg`/`batch`/`undo`/`redo` (store methods, `store.ts:494+`); branded ids
-`asNodeId`/`asEdgeId`/… (`types/primitives.ts:10`); `getContext` (`ai/context.ts:47`); `defineNode`
+`asNodeId`/`asEdgeId`/… (`types/primitives.ts:10`); `getContext` (`ai/context.ts:47`); `configureFonts`
+(`text/defaults.ts`); `defineNode`
 (`node-types/define-node.ts:177`).
 
 ## Rendering hot path (`src/render/`)
@@ -56,9 +57,12 @@ Siblings: `interaction.ts`, `presence.ts`, `conflict.ts`, `inverse-op.ts`, `sync
   string version cost ~5–8ms at 2k edges (:112). Store bumps via `bumpEdgeVersion` on edge add/update
   AND on incident `node.update` (`store.ts:158,321`). Drag bypasses the cache (:1188) — version
   doesn't bump mid-gesture.
-- **Font/math epoch** (`text/font-epoch.ts`) bumps an int on `document.fonts` settle → `clearMeasureCache()`
-  + repaint (`renderer.ts:1431`); the epoch is folded into the bitmap-cache key. Add any font-affecting
-  field to that key or you get stale glyphs.
+- **Font/math epoch** (`text/font-epoch.ts`, a dependency-free leaf) bumps an int on `document.fonts`
+  settle **and on `configureFonts()`**; subscribers pull (measure clears its cache, renderer repaints),
+  and the epoch is folded into the bitmap-cache key. Add any font-affecting field to that key or you get
+  stale glyphs. **All font resolution goes through the `getFontStack`/`getFontSizePx`/`getLineHeightPx`
+  getters in `text/defaults.ts`** (the runtime registry `configureFonts()` mutates) — never read the
+  deprecated `FONT_*_MAP` constants, or an override won't reach measurement/paint/export.
 - **Sub-pixel / readability skips**: `MIN_ON_SCREEN_SIZE_PX 1.5` (:85), `MIN_READABLE_FONT_PX 3` (:93) —
   skipping bypasses path build + the bitmap FNV walk. Don't remove without measuring.
 - **`undefined` → `null` normalization** (`store.ts:429`, `slicePrev` :445): `undefined` is dropped by

@@ -1,4 +1,4 @@
-import { FONT_FAMILY_MAP, FONT_SIZE_MAP, LINE_HEIGHT_MAP } from '../text'
+import { getFontSizePx, getFontStack, getLineHeightPx } from '../text'
 import type { EditorAdapter, EditorAdapterFactory } from './adapter'
 import {
   handleEnter,
@@ -35,8 +35,8 @@ export const createDefaultTextareaEditor: EditorAdapterFactory = ({
   const align = style.textAlign ?? 'center'
   const color = style.textColor ?? '#1f2937'
 
-  const fontPx = FONT_SIZE_MAP[fontSize]
-  const lineHeightPx = LINE_HEIGHT_MAP[fontSize]
+  const fontPx = getFontSizePx(fontSize)
+  const lineHeightPx = getLineHeightPx(fontSize)
 
   // Screen-space placement: node world-(x,y) → screen via camera.
   const screenX = (node.x - camera.x) * camera.z
@@ -87,7 +87,7 @@ export const createDefaultTextareaEditor: EditorAdapterFactory = ({
   ta.style.overflow = 'hidden'
   ta.style.background = 'transparent'
   ta.style.color = color
-  ta.style.fontFamily = FONT_FAMILY_MAP[fontFamily]
+  ta.style.fontFamily = getFontStack(fontFamily)
   ta.style.fontSize = `${fontPx * camera.z}px`
   ta.style.lineHeight = `${lineHeightPx * camera.z}px`
   ta.style.textAlign = align

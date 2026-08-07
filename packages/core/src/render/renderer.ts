@@ -19,8 +19,8 @@ import { type CanvasStore, type InteractionState, isMoving as isMovingState } fr
 import {
   DEFAULT_HIGHLIGHT_COLOR,
   DEFAULT_TEXT_COLOR,
-  FONT_FAMILY_MAP,
-  FONT_SIZE_MAP,
+  getFontSizePx,
+  getFontStack,
   getOrRenderTextBitmap,
   subscribeFontEpoch,
   subscribeMathEpoch,
@@ -991,7 +991,7 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     const fontSize = style?.fontSize ?? 'M'
     // Readability skip — text below ~3px on-screen is unreadable noise.
     // Bypasses cache lookup (FNV walk + concat) and the drawImage blit.
-    if (FONT_SIZE_MAP[fontSize] * env.zoom < MIN_READABLE_FONT_PX) return
+    if (getFontSizePx(fontSize) * env.zoom < MIN_READABLE_FONT_PX) return
     // Layout the text within the shape's visible interior (capsule's
     // rect body excluding the accent circle, diamond's inscribed rect,
     // ellipse's inscribed rect, thought-cloud's body below the dome,
@@ -1027,7 +1027,7 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     zoom: number,
   ): void => {
     const fontSize = node.style?.fontSize ?? 'M'
-    const fontPx = FONT_SIZE_MAP[fontSize]
+    const fontPx = getFontSizePx(fontSize)
     if (fontPx * zoom < MIN_READABLE_FONT_PX) return
     ctx.save()
     ctx.fillStyle = '#94a3b8'
@@ -1036,7 +1036,7 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     // Resolve the font *token* (e.g. 'handwriting') to its real CSS stack,
     // same as content paint — and default to 'handwriting' to match
     // paintNodeContent, so the placeholder uses the node's current font.
-    ctx.font = `italic ${fontPx}px ${FONT_FAMILY_MAP[node.style?.fontFamily ?? 'handwriting']}`
+    ctx.font = `italic ${fontPx}px ${getFontStack(node.style?.fontFamily ?? 'handwriting')}`
     ctx.fillText('Type to edit…', node.w / 2, node.h / 2)
     ctx.restore()
   }

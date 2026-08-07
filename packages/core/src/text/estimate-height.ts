@@ -8,7 +8,7 @@ import type { FontFamily, FontSize, TextStyle } from '../types'
  * needs to compute the height a piece of markdown will take at a given
  * width.
  */
-import { CODE_BLOCK_MARGIN_Y, CONTENT_HEIGHT_BUFFER, LINE_HEIGHT_MAP } from './defaults'
+import { CODE_BLOCK_MARGIN_Y, CONTENT_HEIGHT_BUFFER, getLineHeightPx } from './defaults'
 import { type LayoutLine, layoutTokens } from './layout'
 import { tokenize } from './tokens'
 
@@ -51,8 +51,8 @@ export const estimateMarkdownContentHeight = ({
     fontSize,
     textStyle,
   })
-  const lineHeight = LINE_HEIGHT_MAP[fontSize]
+  const lineHeight = getLineHeightPx(fontSize)
   return getContentHeight(lines, lineHeight) + CONTENT_HEIGHT_BUFFER
 }
 
-export const getMarkdownLineHeightPx = (fontSize: FontSize): number => LINE_HEIGHT_MAP[fontSize]
+export const getMarkdownLineHeightPx = (fontSize: FontSize): number => getLineHeightPx(fontSize)

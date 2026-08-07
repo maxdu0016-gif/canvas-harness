@@ -1,4 +1,4 @@
-import { LINE_HEIGHT_MAP, estimateMarkdownContentHeight } from '../text'
+import { estimateMarkdownContentHeight, getLineHeightPx } from '../text'
 import type { Node } from '../types'
 
 /**
@@ -31,7 +31,7 @@ export const shouldAutoFit = (node: Node): boolean => {
  */
 export const computeAutoFitHeight = (node: Node): number => {
   const fontSize = node.style?.fontSize ?? 'M'
-  const oneLine = LINE_HEIGHT_MAP[fontSize]
+  const oneLine = getLineHeightPx(fontSize)
   const content = node.content ?? ''
   if (!content.trim()) return oneLine
   return Math.max(

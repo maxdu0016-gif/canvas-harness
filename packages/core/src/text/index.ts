@@ -4,19 +4,29 @@ export { tokenize } from './tokens'
 export type { LayoutLine, LayoutOptions, StyledRun } from './layout'
 export { layoutTokens } from './layout'
 
+export type { FontConfig } from './defaults'
 export {
   CODE_BG_COLOR,
   CODE_BLOCK_MARGIN_Y,
   CODE_BLOCK_PADDING_X,
   CONTENT_HEIGHT_BUFFER,
   CONTENT_PADDING,
+  DEFAULT_FONT_SIZES,
+  DEFAULT_FONT_STACKS,
   DEFAULT_HIGHLIGHT_COLOR,
   DEFAULT_HIGHLIGHT_COLOR_DARK,
+  DEFAULT_LINE_HEIGHTS,
   DEFAULT_TEXT_COLOR,
+  // Deprecated map aliases — reflect defaults only; prefer the getters.
   FONT_FAMILY_MAP,
   FONT_SIZE_MAP,
   LINE_HEIGHT_MAP,
   LINK_COLOR,
+  configureFonts,
+  getFontSizePx,
+  getFontStack,
+  getLineHeightPx,
+  resetFonts,
 } from './defaults'
 
 export { clearMeasureCache, getCanvasFont, measureText } from './measure'

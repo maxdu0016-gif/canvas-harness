@@ -14,9 +14,9 @@ import {
   CODE_BLOCK_PADDING_X,
   DEFAULT_HIGHLIGHT_COLOR,
   DEFAULT_TEXT_COLOR,
-  FONT_SIZE_MAP,
-  LINE_HEIGHT_MAP,
   LINK_COLOR,
+  getFontSizePx,
+  getLineHeightPx,
 } from './defaults'
 import { getContentHeight } from './estimate-height'
 import { type LayoutLine, layoutTokens } from './layout'
@@ -100,8 +100,8 @@ export const drawTextToCanvas = (ctx: CanvasRenderingContext2D, opts: DrawTextOp
   ctx.fillStyle = opts.textColor || DEFAULT_TEXT_COLOR
   ctx.strokeStyle = opts.textColor || DEFAULT_TEXT_COLOR
 
-  const fontSizePx = FONT_SIZE_MAP[opts.fontSize]
-  const lineHeight = LINE_HEIGHT_MAP[opts.fontSize]
+  const fontSizePx = getFontSizePx(opts.fontSize)
+  const lineHeight = getLineHeightPx(opts.fontSize)
   const contentHeight = getContentHeight(lines, lineHeight)
   const availableHeight = Math.max(0, opts.height)
   const shouldCenterVertically = contentHeight <= availableHeight
