@@ -22,7 +22,7 @@ import { bumpFontEpoch } from './font-epoch'
 export const DEFAULT_FONT_STACKS: Record<FontFamily, string> = {
   handwriting: '"Architects Daughter", cursive',
   'sans-serif':
-    '"Hanken Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", ui-sans-serif, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+    '"Atkinson Hyperlegible Next", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", ui-sans-serif, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
   serif: '"Lora", "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
   monospace:
     '"Inconsolata", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -60,7 +60,7 @@ export const getLineHeightPx = (size: FontSize): number => lineHeights[size]
 
 /** Overrides for `configureFonts()`. Any subset; unspecified keys keep their current value. */
 export type FontConfig = {
-  /** Map a family token to a CSS font stack (e.g. `{ 'sans-serif': '"Hanken Grotesk", sans-serif' }`). */
+  /** Map a family token to a CSS font stack (e.g. `{ 'sans-serif': '"Inter", sans-serif' }`). */
   family?: Partial<Record<FontFamily, string>>
   /** Override a size token's pixel size. Affects newly measured/laid-out text (see note on reflow). */
   size?: Partial<Record<FontSize, number>>
@@ -100,7 +100,7 @@ const mergeDefined = <K extends string, V>(
  * document keep their persisted `w`/`h` — this does not reflow them.
  *
  * @example
- * configureFonts({ family: { 'sans-serif': '"Hanken Grotesk", system-ui, sans-serif' } })
+ * configureFonts({ family: { 'sans-serif': '"Inter", system-ui, sans-serif' } })
  */
 export const configureFonts = (config: FontConfig): void => {
   if (config.family) fontStacks = mergeDefined(fontStacks, config.family)

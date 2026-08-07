@@ -15,9 +15,9 @@ import {
 afterEach(() => resetFonts())
 
 describe('font defaults', () => {
-  test('the sans-serif token defaults to Hanken Grotesk', () => {
-    expect(getFontStack('sans-serif')).toContain('Hanken Grotesk')
-    expect(DEFAULT_FONT_STACKS['sans-serif']).toContain('Hanken Grotesk')
+  test('the sans-serif token defaults to Atkinson Hyperlegible Next', () => {
+    expect(getFontStack('sans-serif')).toContain('Atkinson Hyperlegible Next')
+    expect(DEFAULT_FONT_STACKS['sans-serif']).toContain('Atkinson Hyperlegible Next')
   })
 
   test('getters return the built-in sizes / line heights', () => {
@@ -58,7 +58,7 @@ describe('configureFonts', () => {
     // overwrite a real default (which would yield NaN geometry downstream).
     configureFonts({ size: { M: undefined }, family: { 'sans-serif': undefined } })
     expect(getFontSizePx('M')).toBe(16)
-    expect(getFontStack('sans-serif')).toContain('Hanken Grotesk')
+    expect(getFontStack('sans-serif')).toContain('Atkinson Hyperlegible Next')
   })
 
   test('bumps the font epoch so caches invalidate + canvases repaint', () => {
