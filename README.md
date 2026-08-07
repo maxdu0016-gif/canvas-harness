@@ -240,6 +240,29 @@ How it works:
 
 Pan / zoom of math-bearing scenes is the same speed as text-only scenes once the cache is warm — math bitmaps composite into the text bitmap at paint time and ride the existing static-surface cache from there.
 
+## Fonts
+
+Text nodes pick a font via `style.fontFamily` — one of five tokens (`handwriting` (default), `sans-serif`, `serif`, `monospace`, `informal`), each mapping to a CSS font stack. The library is headless, so it only *names* fonts: you load the actual faces (`@font-face` / Google Fonts) and it measures + paints against them.
+
+Override any stack — or the per-token sizes / line-heights — with `configureFonts`:
+
+```ts
+import { configureFonts } from '@canvas-harness/core'
+
+configureFonts({
+  family: { 'sans-serif': '"Hanken Grotesk", system-ui, sans-serif' },
+  size: { L: 26 },        // optional — per size token: S / M / L / XL
+  lineHeight: { L: 34 },  // optional
+})
+```
+
+- **Partial + merges over the defaults** — override one token, the rest stay untouched.
+- **App-global; call once at startup**, before nodes are created. Web fonts load document-globally, so the config is global too. Overrides apply to text laid out *after* the call — already-persisted node sizes aren't reflowed.
+- Changing a stack **repaints automatically**: the measurement + glyph caches invalidate via the font epoch once the new face is registered.
+- Getters (`getFontStack` / `getFontSizePx` / `getLineHeightPx`) and the built-ins (`DEFAULT_FONT_STACKS` / `DEFAULT_FONT_SIZES` / `DEFAULT_LINE_HEIGHTS`) are exported for tooling.
+
+Remember to actually load the face — e.g. add it to your Google Fonts `<link>` or an `@font-face`. The library maps the token to the name; it never fetches the font.
+
 ## Persistence
 
 The library is sync end-to-end. `store.subscribe('change', cb)` fires once per committed `OpBatch`; the read API is sync and returns object references (no clones). The typical persistence flow is: subscribe, debounce, snapshot, await your async save.
@@ -383,6 +406,10 @@ A working version with keyboard nav, slide counter, and resize-aware refit ships
 **Built-in renderer + hit-test**
 - `createRenderer(...)` — wires the store to a pair of canvases. The React `<Canvas>` calls this internally; standalone consumers can use it directly.
 - Runtime knobs on the returned `Renderer`: `setBackground`, `setSelectionColor`, `setHideFrames` (drops frame chrome for present mode).
+
+**Fonts** (see [Fonts](#fonts))
+- `configureFonts({ family?, size?, lineHeight? })` — override the font stacks / sizes / line-heights (partial, merges over defaults). App-global; call at startup. You load the faces; the library names them.
+- `getFontStack(token)`, `getFontSizePx(size)`, `getLineHeightPx(size)` — resolve the current values; `DEFAULT_FONT_STACKS` / `DEFAULT_FONT_SIZES` / `DEFAULT_LINE_HEIGHTS` expose the built-ins.
 
 ### `@canvas-harness/react`
 
