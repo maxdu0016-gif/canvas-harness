@@ -22,7 +22,7 @@ import { bumpFontEpoch } from './font-epoch'
 export const DEFAULT_FONT_STACKS: Record<FontFamily, string> = {
   handwriting: '"Architects Daughter", cursive',
   'sans-serif':
-    '"Hanken Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", ui-sans-serif, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+    '"Atkinson Hyperlegible Next", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", ui-sans-serif, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
   serif: '"Lora", "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
   monospace:
     '"Inconsolata", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
