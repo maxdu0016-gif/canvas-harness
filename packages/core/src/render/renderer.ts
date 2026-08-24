@@ -13,6 +13,7 @@ import { computeEdgeGeometry, drawEdge } from '../edges'
  *               Redrawn every rAF tick while interaction.mode !== 'idle'.
  */
 import { getPointAndTangentAtArcLength } from '../edges/arc-length'
+import { drawInkDraft } from '../ink'
 import type { NodeTypeDef, RenderEnv } from '../node-types'
 import { inflateRect, nodeAABB } from '../spatial'
 import { type CanvasStore, type InteractionState, isMoving as isMovingState } from '../store'
@@ -1134,12 +1135,14 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
       const dragRoughEnabled =
         inDragMap.size <= ROUGH_MAX_MOVING_NODES && camera.z >= ROUGH_MIN_ZOOM
       for (const node of inDragMap.values()) {
+        const nodeTypeDef = store.getNodeTypeDef(node.type)
         if (
           !isDrawablePrimitive(node.type) &&
           node.type !== 'text' &&
           node.type !== 'image' &&
           node.type !== 'icon' &&
-          node.type !== 'frame'
+          node.type !== 'frame' &&
+          !nodeTypeDef?.renderCanvas
         )
           continue
         drawWithNodeTransform(ctx, node, () => {
@@ -1153,6 +1156,12 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
           }
           if (node.type === 'icon') {
             paintIconNode(ctx, node, assetCache, scale, theme)
+            return
+          }
+          if (nodeTypeDef?.renderCanvas) {
+            ctx.save()
+            nodeTypeDef.renderCanvas(ctx, node, dragEnv)
+            ctx.restore()
             return
           }
           if (isDrawablePrimitive(node.type)) {
@@ -1301,6 +1310,25 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
           isMoving: true,
         })
       }
+    }
+
+    // 5. Pressure-aware ink and eraser previews live on the engine's
+    //    interactive surface, never in the document/op log.
+    if (interaction.mode === 'creating-ink' && interaction.draftInk) {
+      const { samples, size, color, opacity } = interaction.draftInk
+      drawInkDraft(ctx, samples, size, color, opacity)
+    }
+    if (interaction.mode === 'erasing-ink' && interaction.draftEraser) {
+      const { point, radius } = interaction.draftEraser
+      ctx.save()
+      ctx.beginPath()
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.12)'
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)'
+      ctx.lineWidth = 1.5 / Math.max(0.01, camera.z)
+      ctx.fill()
+      ctx.stroke()
+      ctx.restore()
     }
   }
 
