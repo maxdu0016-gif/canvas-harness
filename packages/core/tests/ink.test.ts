@@ -1,21 +1,8 @@
 import { describe, expect, test } from 'vitest'
-import { createInkGeometry, hitTestInkWorld, interpolateInkSamples, readInkData } from '../src/ink'
+import { createInkGeometry, hitTestInkSegmentWorld, hitTestInkWorld, readInkData } from '../src/ink'
 import { type Node, asNodeId } from '../src/types'
 
 describe('ink geometry', () => {
-  test('interpolates sparse input without gaps and preserves pressure', () => {
-    const samples = interpolateInkSamples(
-      { x: 0, y: 0, pressure: 0.2 },
-      { x: 10, y: 0, pressure: 0.8 },
-      2,
-    )
-
-    expect(samples).toHaveLength(5)
-    expect(samples[0]).toMatchObject({ x: 2, y: 0 })
-    expect(samples[0]!.pressure).toBeCloseTo(0.32)
-    expect(samples.at(-1)).toEqual({ x: 10, y: 0, pressure: 0.8 })
-  })
-
   test('stores only points + size and derives a compact local geometry', () => {
     const geometry = createInkGeometry(
       [
@@ -56,6 +43,20 @@ describe('ink geometry', () => {
 
     expect(hitTestInkWorld(node, { x: 30, y: 20 })).toBe(true)
     expect(hitTestInkWorld(node, { x: 30, y: 60 })).toBe(false)
+  })
+
+  test('hit-tests the full swept eraser segment between sparse events', () => {
+    const geometry = createInkGeometry(
+      [
+        { x: 50, y: 10, pressure: 0.5 },
+        { x: 50, y: 90, pressure: 0.5 },
+      ],
+      4,
+    )!
+    const node = makeNode(geometry)
+
+    expect(hitTestInkSegmentWorld(node, { x: 0, y: 50 }, { x: 100, y: 50 }, 2)).toBe(true)
+    expect(hitTestInkSegmentWorld(node, { x: 0, y: 120 }, { x: 100, y: 120 }, 2)).toBe(false)
   })
 })
 

@@ -13,7 +13,7 @@ import { computeEdgeGeometry, drawEdge } from '../edges'
  *               Redrawn every rAF tick while interaction.mode !== 'idle'.
  */
 import { getPointAndTangentAtArcLength } from '../edges/arc-length'
-import { drawInkDraft } from '../ink'
+import { drawInkDraft, drawInkNodeWithOpacity } from '../ink'
 import type { NodeTypeDef, RenderEnv } from '../node-types'
 import { inflateRect, nodeAABB } from '../spatial'
 import { type CanvasStore, type InteractionState, isMoving as isMovingState } from '../store'
@@ -316,13 +316,18 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     // Per ARCHITECTURE.md §4.2: nodes currently being dragged or resized,
     // AND edges incident to them, are excluded from static and drawn on
     // the interactive canvas at their uncommitted positions instead.
-    const excludedNodes =
+    const movingExcludedNodes =
       interaction.mode === 'dragging' || interaction.mode === 'resizing'
         ? new Set(interaction.draggedIds)
         : null
+    const excludedNodes =
+      movingExcludedNodes ??
+      (interaction.mode === 'erasing-ink' && interaction.draftEraser
+        ? new Set(interaction.draftEraser.erasedIds)
+        : null)
     // An edge being mid-point-dragged is excluded too — the interactive
     // layer paints it with the in-progress control from `midpointDraft`.
-    const baseExcludedEdges = excludedNodes ? incidentEdgeIds(excludedNodes) : null
+    const baseExcludedEdges = movingExcludedNodes ? incidentEdgeIds(movingExcludedNodes) : null
     const midpointEdgeId = interaction.midpointDraft?.edgeId ?? null
     const excludedEdges: ReadonlySet<EdgeId> | null =
       midpointEdgeId !== null
@@ -1315,11 +1320,16 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     // 5. Pressure-aware ink and eraser previews live on the engine's
     //    interactive surface, never in the document/op log.
     if (interaction.mode === 'creating-ink' && interaction.draftInk) {
-      const { samples, size, color, opacity } = interaction.draftInk
-      drawInkDraft(ctx, samples, size, color, opacity)
+      const { segments, size, color, opacity } = interaction.draftInk
+      for (const samples of segments) drawInkDraft(ctx, samples, size, color, opacity)
     }
     if (interaction.mode === 'erasing-ink' && interaction.draftEraser) {
-      const { point, radius } = interaction.draftEraser
+      const { point, radius, erasedIds } = interaction.draftEraser
+      for (const id of erasedIds) {
+        const node = store.getNode(id)
+        if (node?.type !== 'ink') continue
+        drawWithNodeTransform(ctx, node, () => drawInkNodeWithOpacity(ctx, node, 0.25))
+      }
       ctx.save()
       ctx.beginPath()
       ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
@@ -1417,6 +1427,7 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     interactiveDirty = true
     loop.requestFrame()
   }
+  let eraserPreviewKey = ''
   const onInteractionChange = (state: InteractionState): void => {
     interactiveDirty = true
     // Mode transitions that affect what the static surface paints:
@@ -1426,6 +1437,12 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     // Any of these need a static repaint at the transition boundary
     // so the LOD changes (motion fast-path, rough auto-disable, text
     // bitmap downscale) take effect on the very next frame.
+    const nextEraserPreviewKey =
+      state.mode === 'erasing-ink' && state.draftEraser
+        ? state.draftEraser.erasedIds.join('\u0000')
+        : ''
+    const eraserPreviewChanged = nextEraserPreviewKey !== eraserPreviewKey
+    eraserPreviewKey = nextEraserPreviewKey
     if (
       state.mode === 'dragging' ||
       state.mode === 'resizing' ||
@@ -1438,6 +1455,9 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
       // so the cache content must be rebuilt. This also guarantees the
       // first frame of a pan does a full render — which is what swaps
       // custom-node React overlays to their canvas fallback.
+      cacheStale = true
+    } else if (state.mode === 'erasing-ink' && eraserPreviewChanged) {
+      staticDirty = true
       cacheStale = true
     } else if (state.mode === 'zooming') {
       // Zoom is special: the scaled-blit tier (paintStatic tier 2.5)

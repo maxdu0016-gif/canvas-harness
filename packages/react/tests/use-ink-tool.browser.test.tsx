@@ -8,7 +8,7 @@ import {
 } from '@canvas-harness/core'
 import { StrictMode, act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { Canvas, CanvasProvider } from '../src'
 import type { InkToolDefaults } from '../src/internal/use-ink-tool'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -39,6 +39,16 @@ const mountCanvas = async (
   if (!wrap) throw new Error('canvas wrap not found')
   return {
     wrap,
+    rerender: (nextTool: 'ink' | 'eraser') =>
+      act(async () => {
+        root.render(
+          <StrictMode>
+            <CanvasProvider store={store}>
+              <Canvas tool={nextTool} inkDefaults={inkDefaults} />
+            </CanvasProvider>
+          </StrictMode>,
+        )
+      }),
     cleanup: () => act(async () => root.unmount()).then(() => container.remove()),
   }
 }
@@ -89,7 +99,7 @@ describe('built-in ink tool', () => {
     expect(nodes[0]!.data).toMatchObject({ owner: 'alice' })
     const ink = readInkData(nodes[0]!)
     expect(ink?.size).toBe(6)
-    expect(ink?.points).toHaveLength(6)
+    expect(ink?.points).toHaveLength(2)
     expect(ink).not.toHaveProperty('outline')
 
     store.undo()
@@ -164,6 +174,79 @@ describe('built-in ink tool', () => {
     expect(store.getAllNodes()).toHaveLength(0)
     store.undo()
     expect(store.getAllNodes()).toHaveLength(1)
+    await mounted.cleanup()
+  })
+
+  test('splits a long stroke into capped seamless nodes in one undo batch', async () => {
+    const store = createCanvasStore({ clientId: asClientId('long-ink-test') })
+    const mounted = await mountCanvas(store, 'ink')
+
+    await act(async () => {
+      firePointer(mounted.wrap, 'pointerdown', { x: 0, y: 40 })
+      for (let index = 1; index <= 605; index++) {
+        firePointer(mounted.wrap, 'pointermove', { x: index * 2, y: 40 })
+      }
+      firePointer(mounted.wrap, 'pointerup', { x: 1210, y: 40 })
+    })
+
+    const nodes = store.getAllNodes()
+    expect(nodes).toHaveLength(2)
+    const first = readInkData(nodes[0]!)!
+    const second = readInkData(nodes[1]!)!
+    expect(first.points).toHaveLength(600)
+    expect(second.points.length).toBeLessThanOrEqual(600)
+    const firstEnd = first.points.at(-1)!
+    const secondStart = second.points[0]!
+    expect(nodes[0]!.x + firstEnd[0]).toBeCloseTo(nodes[1]!.x + secondStart[0])
+    expect(nodes[0]!.y + firstEnd[1]).toBeCloseTo(nodes[1]!.y + secondStart[1])
+
+    store.undo()
+    expect(store.getAllNodes()).toHaveLength(0)
+    await mounted.cleanup()
+  })
+
+  test('sweeps between sparse eraser samples and publishes dim-preview ids', async () => {
+    const store = createCanvasStore({ clientId: asClientId('swept-eraser-test') })
+    const geometry = createInkGeometry(
+      [
+        { x: 100, y: 40, pressure: 0.5 },
+        { x: 100, y: 160, pressure: 0.5 },
+      ],
+      6,
+    )!
+    store.addNode({
+      id: asNodeId('swept-ink'),
+      type: 'ink',
+      x: geometry.x,
+      y: geometry.y,
+      w: geometry.w,
+      h: geometry.h,
+      angle: 0,
+      groups: [],
+      data: { ink: geometry.ink },
+    })
+    const mounted = await mountCanvas(store, 'eraser')
+
+    await act(async () => firePointer(mounted.wrap, 'pointerdown', { x: 20, y: 100 }))
+    await act(async () => firePointer(mounted.wrap, 'pointermove', { x: 180, y: 100 }))
+    await act(async () => new Promise(resolve => requestAnimationFrame(resolve)))
+    expect(store.getInteractionState().draftEraser?.erasedIds).toEqual([asNodeId('swept-ink')])
+    await act(async () => firePointer(mounted.wrap, 'pointerup', { x: 180, y: 100 }))
+    expect(store.getAllNodes()).toHaveLength(0)
+    await mounted.cleanup()
+  })
+
+  test('releases pointer capture when the active tool changes mid-stroke', async () => {
+    const store = createCanvasStore({ clientId: asClientId('capture-test') })
+    const mounted = await mountCanvas(store, 'ink')
+    vi.spyOn(mounted.wrap, 'hasPointerCapture').mockReturnValue(true)
+    const release = vi.spyOn(mounted.wrap, 'releasePointerCapture')
+
+    await act(async () => firePointer(mounted.wrap, 'pointerdown', { x: 20, y: 20 }))
+    await mounted.rerender('eraser')
+
+    expect(release).toHaveBeenCalledWith(1)
+    expect(store.getInteractionState().mode).toBe('idle')
     await mounted.cleanup()
   })
 })

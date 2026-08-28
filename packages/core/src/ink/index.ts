@@ -1,12 +1,15 @@
 export {
   buildInkOutline,
   createInkGeometry,
+  distanceBetweenSegments,
   distanceToSegment,
   drawInkDraft,
   drawInkNode,
+  drawInkNodeWithOpacity,
   hitTestInkLocal,
+  hitTestInkSegmentWorld,
   hitTestInkWorld,
-  interpolateInkSamples,
+  outlineFromInk,
   readInkData,
   traceSmoothInkOutline,
 } from './geometry'

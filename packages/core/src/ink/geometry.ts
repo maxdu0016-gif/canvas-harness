@@ -5,26 +5,6 @@ import type { InkGeometry, InkNodeData, InkSample, InkStrokeData } from './types
 
 const MIN_NODE_SIZE = 1
 
-/** Fill sparse browser samples so fast stylus motion stays visually continuous. */
-export const interpolateInkSamples = (
-  from: InkSample,
-  to: InkSample,
-  maxSpacing: number,
-): InkSample[] => {
-  const distance = Math.hypot(to.x - from.x, to.y - from.y)
-  const steps = Math.min(64, Math.max(1, Math.ceil(distance / Math.max(0.1, maxSpacing))))
-  const result: InkSample[] = []
-  for (let step = 1; step <= steps; step++) {
-    const t = step / steps
-    result.push({
-      x: from.x + (to.x - from.x) * t,
-      y: from.y + (to.y - from.y) * t,
-      pressure: from.pressure + (to.pressure - from.pressure) * t,
-    })
-  }
-  return result
-}
-
 /** Trace a closed outline with midpoint quadratic curves instead of visible segments. */
 export const traceSmoothInkOutline = (
   ctx: CanvasRenderingContext2D,
@@ -100,28 +80,35 @@ export const createInkGeometry = (
 
   const w = Math.max(MIN_NODE_SIZE, maxX - minX)
   const h = Math.max(MIN_NODE_SIZE, maxY - minY)
+  const ink: InkStrokeData = {
+    type: 'ink',
+    version: 1,
+    size,
+    points: samples.map(({ x, y, pressure }) => [x - minX, y - minY, pressure]),
+    intrinsicWidth: w,
+    intrinsicHeight: h,
+  }
+  validInkData.add(ink)
   return {
     x: minX,
     y: minY,
     w,
     h,
-    ink: {
-      type: 'ink',
-      version: 1,
-      size,
-      points: samples.map(({ x, y, pressure }) => [x - minX, y - minY, pressure]),
-      intrinsicWidth: w,
-      intrinsicHeight: h,
-    },
+    ink,
   }
 }
+
+const validInkData = new WeakSet<object>()
+const invalidInkData = new WeakSet<object>()
 
 /** Read validated engine geometry from a built-in ink node. */
 export const readInkData = (node: Node): InkStrokeData | null => {
   if (node.type !== 'ink' || !node.data || typeof node.data !== 'object') return null
   const raw = (node.data as Partial<InkNodeData>).ink
+  if (!raw || typeof raw !== 'object') return null
+  if (validInkData.has(raw)) return raw
+  if (invalidInkData.has(raw)) return null
   if (
-    !raw ||
     raw.type !== 'ink' ||
     raw.version !== 1 ||
     !Number.isFinite(raw.size) ||
@@ -136,14 +123,16 @@ export const readInkData = (node: Node): InkStrokeData | null => {
     !Number.isFinite(raw.intrinsicHeight) ||
     raw.intrinsicHeight <= 0
   ) {
+    invalidInkData.add(raw)
     return null
   }
+  validInkData.add(raw)
   return raw
 }
 
 const outlineCache = new WeakMap<InkStrokeData, Array<[number, number]>>()
 
-const outlineFromInk = (ink: InkStrokeData): Array<[number, number]> => {
+export const outlineFromInk = (ink: InkStrokeData): Array<[number, number]> => {
   const cached = outlineCache.get(ink)
   if (cached) return cached
   const outline = buildInkOutline(
@@ -156,6 +145,15 @@ const outlineFromInk = (ink: InkStrokeData): Array<[number, number]> => {
 
 /** Paint a committed ink node in node-local space. */
 export const drawInkNode = (ctx: CanvasRenderingContext2D, node: Node): void => {
+  drawInkNodeWithOpacity(ctx, node, 1)
+}
+
+/** Paint an ink node with an additional opacity multiplier for interaction previews. */
+export const drawInkNodeWithOpacity = (
+  ctx: CanvasRenderingContext2D,
+  node: Node,
+  opacityMultiplier: number,
+): void => {
   const ink = readInkData(node)
   if (!ink) return
   const outline = outlineFromInk(ink)
@@ -165,7 +163,9 @@ export const drawInkNode = (ctx: CanvasRenderingContext2D, node: Node): void => 
   ctx.save()
   ctx.scale(scaleX, scaleY)
   ctx.fillStyle = node.style?.strokeColor ?? '#1f2937'
-  ctx.globalAlpha = Math.max(0, Math.min(1, (node.style?.opacity ?? 100) / 100))
+  ctx.globalAlpha =
+    Math.max(0, Math.min(1, (node.style?.opacity ?? 100) / 100)) *
+    Math.max(0, Math.min(1, opacityMultiplier))
   ctx.beginPath()
   traceSmoothInkOutline(ctx, outline)
   ctx.fill()
@@ -180,7 +180,7 @@ export const drawInkDraft = (
   color: string,
   opacity = 100,
 ): void => {
-  const outline = buildInkOutline(samples, size)
+  const outline = draftOutlineFromSamples(samples, size)
   if (outline.length === 0) return
   ctx.save()
   ctx.fillStyle = color
@@ -191,6 +191,25 @@ export const drawInkDraft = (
   ctx.restore()
 }
 
+const draftOutlineCache = new WeakMap<
+  ReadonlyArray<InkSample>,
+  Map<number, Array<[number, number]>>
+>()
+
+const draftOutlineFromSamples = (
+  samples: ReadonlyArray<InkSample>,
+  size: number,
+): Array<[number, number]> => {
+  const bySize = draftOutlineCache.get(samples)
+  const cached = bySize?.get(size)
+  if (cached) return cached
+  const outline = buildInkOutline(samples, size)
+  const nextBySize = bySize ?? new Map<number, Array<[number, number]>>()
+  nextBySize.set(size, outline)
+  if (!bySize) draftOutlineCache.set(samples, nextBySize)
+  return outline
+}
+
 export const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2): number => {
   const dx = b.x - a.x
   const dy = b.y - a.y
@@ -198,6 +217,31 @@ export const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2): number => {
   if (lengthSquared === 0) return Math.hypot(point.x - a.x, point.y - a.y)
   const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared))
   return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy))
+}
+
+const cross = (a: Vec2, b: Vec2, c: Vec2): number =>
+  (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+
+const segmentsIntersect = (a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean => {
+  const abC = cross(a, b, c)
+  const abD = cross(a, b, d)
+  const cdA = cross(c, d, a)
+  const cdB = cross(c, d, b)
+  if (abC === 0 && distanceToSegment(c, a, b) === 0) return true
+  if (abD === 0 && distanceToSegment(d, a, b) === 0) return true
+  if (cdA === 0 && distanceToSegment(a, c, d) === 0) return true
+  if (cdB === 0 && distanceToSegment(b, c, d) === 0) return true
+  return abC > 0 !== abD > 0 && cdA > 0 !== cdB > 0
+}
+
+export const distanceBetweenSegments = (a: Vec2, b: Vec2, c: Vec2, d: Vec2): number => {
+  if (segmentsIntersect(a, b, c, d)) return 0
+  return Math.min(
+    distanceToSegment(a, c, d),
+    distanceToSegment(b, c, d),
+    distanceToSegment(c, a, b),
+    distanceToSegment(d, a, b),
+  )
 }
 
 /** Pressure-centerline hit test used by selection and whole-stroke erasing. */
@@ -238,3 +282,43 @@ export const hitTestInkLocal = (node: Node, localPoint: Vec2, extraRadius = 0): 
 /** Hit-test one world point against a rotated/scaled ink node. */
 export const hitTestInkWorld = (node: Node, worldPoint: Vec2, extraRadius = 0): boolean =>
   hitTestInkLocal(node, worldToNodeLocal(worldPoint, node), extraRadius)
+
+/** Hit-test a swept eraser segment against a rotated/scaled ink centerline. */
+export const hitTestInkSegmentWorld = (
+  node: Node,
+  worldA: Vec2,
+  worldB: Vec2,
+  extraRadius = 0,
+): boolean => {
+  const ink = readInkData(node)
+  if (!ink || ink.points.length === 0 || node.w <= 0 || node.h <= 0) return false
+  const localA = worldToNodeLocal(worldA, node)
+  const localB = worldToNodeLocal(worldB, node)
+  const scaleX = node.w / Math.max(MIN_NODE_SIZE, ink.intrinsicWidth)
+  const scaleY = node.h / Math.max(MIN_NODE_SIZE, ink.intrinsicHeight)
+  const a = { x: localA.x / scaleX, y: localA.y / scaleY }
+  const b = { x: localB.x / scaleX, y: localB.y / scaleY }
+  const intrinsicExtra = extraRadius / Math.max(MIN_NODE_SIZE, Math.min(scaleX, scaleY))
+  const radius = ink.size / 2 + intrinsicExtra + 2
+  const first = ink.points[0]
+  if (!first) return false
+  if (ink.points.length === 1) {
+    return distanceToSegment({ x: first[0], y: first[1] }, a, b) <= radius
+  }
+  for (let i = 1; i < ink.points.length; i++) {
+    const previous = ink.points[i - 1]
+    const current = ink.points[i]
+    if (!previous || !current) continue
+    if (
+      distanceBetweenSegments(
+        a,
+        b,
+        { x: previous[0], y: previous[1] },
+        { x: current[0], y: current[1] },
+      ) <= radius
+    ) {
+      return true
+    }
+  }
+  return false
+}

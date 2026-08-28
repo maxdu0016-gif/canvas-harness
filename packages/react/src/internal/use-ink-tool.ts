@@ -16,8 +16,8 @@ import {
   asNodeId,
   createInkGeometry,
   createPalmRejectionState,
+  hitTestInkSegmentWorld,
   hitTestInkWorld,
-  interpolateInkSamples,
   notePenActive,
   notePenInactive,
   screenToWorld,
@@ -28,7 +28,8 @@ import { useEffect, useRef } from 'react'
 const DEFAULT_INK_SIZE = 5
 const DEFAULT_INK_COLOR = '#1f2937'
 const DEFAULT_ERASER_RADIUS_SCREEN = 14
-const MAX_SAMPLE_SPACING_SCREEN = 2
+const MIN_SAMPLE_DISTANCE_SCREEN = 1.5
+const MAX_INK_POINTS_PER_NODE = 600
 
 type ValueOrFactory<T> = T | (() => T | undefined)
 type AddableNode = Omit<Node, 'z'> & { z?: number }
@@ -84,7 +85,7 @@ export const useInkTool = (
 
     let activePointerId: number | null = null
     let activeMode: 'ink' | 'eraser' | null = null
-    let samples: InkSample[] = []
+    let sampleSegments: InkSample[][] = [[]]
     let erasedIds = new Set<NodeId>()
     let activeSize = DEFAULT_INK_SIZE
     let activeStyle: Style = { strokeColor: DEFAULT_INK_COLOR }
@@ -107,10 +108,13 @@ export const useInkTool = (
     const flushDraft = (): void => {
       draftRaf = 0
       if (activeMode === 'ink') {
+        const lastSegmentIndex = sampleSegments.length - 1
         store.setInteractionState({
           mode: 'creating-ink',
           draftInk: {
-            samples: [...samples],
+            segments: sampleSegments.map((segment, index) =>
+              index === lastSegmentIndex ? [...segment] : segment,
+            ),
             size: activeSize,
             color: activeStyle.strokeColor ?? DEFAULT_INK_COLOR,
             opacity: activeStyle.opacity ?? 100,
@@ -124,7 +128,7 @@ export const useInkTool = (
         store.setInteractionState({
           mode: 'erasing-ink',
           draftInk: null,
-          draftEraser: { point: lastEraserWorld, radius },
+          draftEraser: { point: lastEraserWorld, radius, erasedIds: [...erasedIds] },
         })
       }
     }
@@ -134,18 +138,37 @@ export const useInkTool = (
       draftRaf = requestAnimationFrame(flushDraft)
     }
 
-    const appendInkSamples = (event: PointerEvent): void => {
+    const appendInkSamples = (event: PointerEvent, forceFinal = false): void => {
       const camera = store.getCamera()
-      const maxSpacingWorld = MAX_SAMPLE_SPACING_SCREEN / Math.max(0.01, camera.z)
-      for (const sample of eventSamples(event)) {
+      const minDistanceWorld = MIN_SAMPLE_DISTANCE_SCREEN / Math.max(0.01, camera.z)
+      const events = eventSamples(event)
+      for (let index = 0; index < events.length; index++) {
+        const sample = events[index]
+        if (!sample) continue
         const world = screenToWorld(screenFromEvent(sample), camera)
-        const previous = samples[samples.length - 1]
+        let segment = sampleSegments[sampleSegments.length - 1]
+        if (!segment) {
+          segment = []
+          sampleSegments.push(segment)
+        }
+        const previous = segment[segment.length - 1]
         if (previous && previous.x === world.x && previous.y === world.y) continue
+        const isForcedFinal = forceFinal && index === events.length - 1
+        if (
+          previous &&
+          !isForcedFinal &&
+          Math.hypot(world.x - previous.x, world.y - previous.y) < minDistanceWorld
+        ) {
+          continue
+        }
         const pressure =
           sample.pointerType === 'pen' ? Math.max(0.05, Math.min(1, sample.pressure || 0.5)) : 0.5
         const next = { ...world, pressure }
-        if (!previous) samples.push(next)
-        else samples.push(...interpolateInkSamples(previous, next, maxSpacingWorld))
+        if (segment.length >= MAX_INK_POINTS_PER_NODE && previous) {
+          sampleSegments.push([previous, next])
+        } else {
+          segment.push(next)
+        }
       }
       scheduleDraft()
     }
@@ -157,20 +180,28 @@ export const useInkTool = (
         Math.max(0.01, camera.z)
       for (const sample of eventSamples(event)) {
         const world = screenToWorld(screenFromEvent(sample), camera)
-        lastEraserWorld = world
+        const previous = lastEraserWorld
         const candidates = store.querySpatial({
           rect: {
-            x: world.x - radius,
-            y: world.y - radius,
-            w: radius * 2,
-            h: radius * 2,
+            x: Math.min(previous?.x ?? world.x, world.x) - radius,
+            y: Math.min(previous?.y ?? world.y, world.y) - radius,
+            w: Math.abs(world.x - (previous?.x ?? world.x)) + radius * 2,
+            h: Math.abs(world.y - (previous?.y ?? world.y)) + radius * 2,
           },
         }).nodes
         for (const id of candidates) {
           if (erasedIds.has(id)) continue
           const node = store.getNode(id)
-          if (node?.type === 'ink' && hitTestInkWorld(node, world, radius)) erasedIds.add(id)
+          if (
+            node?.type === 'ink' &&
+            (previous
+              ? hitTestInkSegmentWorld(node, previous, world, radius)
+              : hitTestInkWorld(node, world, radius))
+          ) {
+            erasedIds.add(id)
+          }
         }
+        lastEraserWorld = world
       }
       scheduleDraft()
     }
@@ -195,7 +226,7 @@ export const useInkTool = (
       }
       activePointerId = event.pointerId
       activeMode = isPenEraserContact(event) ? 'eraser' : (tool as 'ink' | 'eraser')
-      samples = []
+      sampleSegments = [[]]
       erasedIds = new Set<NodeId>()
       lastEraserWorld = null
       el.setPointerCapture(event.pointerId)
@@ -213,9 +244,11 @@ export const useInkTool = (
     }
 
     const resetGesture = (): void => {
+      const pointerId = activePointerId
+      if (pointerId !== null && el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId)
       activePointerId = null
       activeMode = null
-      samples = []
+      sampleSegments = [[]]
       erasedIds.clear()
       lastEraserWorld = null
       if (draftRaf !== 0) cancelAnimationFrame(draftRaf)
@@ -224,39 +257,44 @@ export const useInkTool = (
     }
 
     const commitGesture = (): void => {
-      if (activeMode === 'ink' && samples.length > 0) {
-        const geometry = createInkGeometry(samples, activeSize)
-        if (!geometry) return
+      const nonEmptySegments = sampleSegments.filter(segment => segment.length > 0)
+      if (activeMode === 'ink' && nonEmptySegments.length > 0) {
         const data = resolveValue(defaultsRef.current?.data)
-        const id = asNodeId(store.generateId())
-        const input: InkNodeFactoryInput = {
-          id,
-          geometry,
-          samples,
-          size: activeSize,
-          style: activeStyle,
-          ...(data ? { data } : {}),
-        }
         const createNode = defaultsRef.current?.createNode
-        const node = createNode
-          ? createNode(input)
-          : {
+        store.batch(() => {
+          for (const segment of nonEmptySegments) {
+            const geometry = createInkGeometry(segment, activeSize)
+            if (!geometry) continue
+            const id = asNodeId(store.generateId())
+            const input: InkNodeFactoryInput = {
               id,
-              type: 'ink',
-              x: geometry.x,
-              y: geometry.y,
-              w: geometry.w,
-              h: geometry.h,
-              angle: 0,
-              groups: [],
-              style: {
-                ...activeStyle,
-                backgroundColor: 'transparent',
-                autoFit: false,
-              },
-              data: { ...data, ink: geometry.ink },
+              geometry,
+              samples: segment,
+              size: activeSize,
+              style: activeStyle,
+              ...(data ? { data } : {}),
             }
-        if (node) store.addNode(node)
+            const node = createNode
+              ? createNode(input)
+              : {
+                  id,
+                  type: 'ink',
+                  x: geometry.x,
+                  y: geometry.y,
+                  w: geometry.w,
+                  h: geometry.h,
+                  angle: 0,
+                  groups: [],
+                  style: {
+                    ...activeStyle,
+                    backgroundColor: 'transparent',
+                    autoFit: false,
+                  },
+                  data: { ...data, ink: geometry.ink },
+                }
+            if (node) store.addNode(node)
+          }
+        })
       } else if (activeMode === 'eraser' && erasedIds.size > 0) {
         store.batch(() => {
           for (const id of erasedIds) {
@@ -271,12 +309,11 @@ export const useInkTool = (
       if (event.pointerId !== activePointerId) return
       event.preventDefault()
       try {
-        if (activeMode === 'ink') appendInkSamples(event)
+        if (activeMode === 'ink') appendInkSamples(event, true)
         else collectErasedNodes(event)
         commitGesture()
         suppressNextClick = true
       } finally {
-        if (el.hasPointerCapture(event.pointerId)) el.releasePointerCapture(event.pointerId)
         resetGesture()
       }
     }
@@ -285,7 +322,6 @@ export const useInkTool = (
       if (event.pointerType === 'pen') notePenInactive(palm, Date.now())
       if (event.pointerId !== activePointerId) return
       event.preventDefault()
-      if (el.hasPointerCapture(event.pointerId)) el.releasePointerCapture(event.pointerId)
       resetGesture()
     }
 

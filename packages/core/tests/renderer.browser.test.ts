@@ -3,6 +3,7 @@
  * Mounts a real canvas, paints, asserts pixels.
  */
 import { describe, expect, test } from 'vitest'
+import { createInkGeometry } from '../src/ink'
 import { createRenderer } from '../src/render'
 import { createCanvasStore } from '../src/store'
 import { type Node, asClientId, asNodeId } from '../src/types'
@@ -331,6 +332,58 @@ describe('Renderer (browser)', () => {
     await waitFrame()
     await waitFrame()
     expect(renderer.lastDrawCount()).toBe(1)
+
+    renderer.dispose()
+    cleanup(staticCanvas, interactiveCanvas)
+  })
+
+  test('moves eraser targets to the interactive layer at dimmed opacity', async () => {
+    const { staticCanvas, interactiveCanvas } = makeCanvases(240, 180)
+    const store = createCanvasStore({ clientId: asClientId('eraser-preview') })
+    const geometry = createInkGeometry(
+      [
+        { x: 40, y: 90, pressure: 0.5 },
+        { x: 200, y: 90, pressure: 0.5 },
+      ],
+      10,
+    )!
+    const id = asNodeId('ink-preview')
+    store.addNode({
+      id,
+      type: 'ink',
+      x: geometry.x,
+      y: geometry.y,
+      w: geometry.w,
+      h: geometry.h,
+      angle: 0,
+      groups: [],
+      style: { strokeColor: '#000000' },
+      data: { ink: geometry.ink },
+    })
+    const renderer = createRenderer({
+      store,
+      staticCanvas,
+      interactiveCanvas,
+      width: 240,
+      height: 180,
+      background: { color: 'transparent' },
+    })
+    renderer.start()
+    await waitFrame()
+    await waitFrame()
+
+    store.setInteractionState({
+      mode: 'erasing-ink',
+      draftEraser: { point: { x: 120, y: 90 }, radius: 14, erasedIds: [id] },
+    })
+    await waitFrame()
+    await waitFrame()
+
+    const staticAlpha = staticCanvas.getContext('2d')!.getImageData(120, 90, 1, 1).data[3]!
+    const previewAlpha = interactiveCanvas.getContext('2d')!.getImageData(120, 90, 1, 1).data[3]!
+    expect(staticAlpha).toBe(0)
+    expect(previewAlpha).toBeGreaterThan(0)
+    expect(previewAlpha).toBeLessThan(200)
 
     renderer.dispose()
     cleanup(staticCanvas, interactiveCanvas)

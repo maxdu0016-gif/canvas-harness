@@ -37,7 +37,7 @@ export type InkNodeData = Record<string, unknown> & {
 
 /** Ephemeral preview kept outside the document/op log while drawing. */
 export type InkDraft = {
-  samples: InkSample[]
+  segments: InkSample[][]
   size: number
   color: string
   opacity: number
@@ -47,4 +47,5 @@ export type InkDraft = {
 export type InkEraserDraft = {
   point: Vec2
   radius: number
+  erasedIds: import('../types').NodeId[]
 }
