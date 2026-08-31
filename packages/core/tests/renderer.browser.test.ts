@@ -337,7 +337,7 @@ describe('Renderer (browser)', () => {
     cleanup(staticCanvas, interactiveCanvas)
   })
 
-  test('moves eraser targets to the interactive layer at dimmed opacity', async () => {
+  test('dims new eraser targets without invalidating the scene cache', async () => {
     const { staticCanvas, interactiveCanvas } = makeCanvases(240, 180)
     const store = createCanvasStore({ clientId: asClientId('eraser-preview') })
     const geometry = createInkGeometry(
@@ -359,6 +359,26 @@ describe('Renderer (browser)', () => {
       groups: [],
       style: { strokeColor: '#000000' },
       data: { ink: geometry.ink },
+    })
+    const secondGeometry = createInkGeometry(
+      [
+        { x: 40, y: 120, pressure: 0.5 },
+        { x: 200, y: 120, pressure: 0.5 },
+      ],
+      10,
+    )!
+    const secondId = asNodeId('ink-preview-second')
+    store.addNode({
+      id: secondId,
+      type: 'ink',
+      x: secondGeometry.x,
+      y: secondGeometry.y,
+      w: secondGeometry.w,
+      h: secondGeometry.h,
+      angle: 0,
+      groups: [],
+      style: { strokeColor: '#000000' },
+      data: { ink: secondGeometry.ink },
     })
     const renderer = createRenderer({
       store,
@@ -384,6 +404,24 @@ describe('Renderer (browser)', () => {
     expect(staticAlpha).toBe(0)
     expect(previewAlpha).toBeGreaterThan(0)
     expect(previewAlpha).toBeLessThan(200)
+    expect(renderer.getLastDrawPath()).toBe('present')
+
+    store.setInteractionState({
+      mode: 'erasing-ink',
+      draftEraser: {
+        point: { x: 120, y: 120 },
+        radius: 14,
+        erasedIds: [id, secondId],
+      },
+    })
+    await waitFrame()
+    await waitFrame()
+    const secondStaticAlpha = staticCanvas.getContext('2d')!.getImageData(120, 120, 1, 1).data[3]!
+    const secondPreviewAlpha = interactiveCanvas.getContext('2d')!.getImageData(120, 120, 1, 1)
+      .data[3]!
+    expect(secondStaticAlpha).toBe(0)
+    expect(secondPreviewAlpha).toBeGreaterThan(0)
+    expect(renderer.getLastDrawPath()).toBe('present')
 
     renderer.dispose()
     cleanup(staticCanvas, interactiveCanvas)

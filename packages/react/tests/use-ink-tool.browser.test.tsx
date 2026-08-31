@@ -183,7 +183,20 @@ describe('built-in ink tool', () => {
 
     await act(async () => {
       firePointer(mounted.wrap, 'pointerdown', { x: 0, y: 40 })
-      for (let index = 1; index <= 605; index++) {
+      for (let index = 1; index <= 600; index++) {
+        firePointer(mounted.wrap, 'pointermove', { x: index * 2, y: 40 })
+      }
+    })
+    await act(async () => new Promise(resolve => requestAnimationFrame(resolve)))
+    const firstDraft = store.getInteractionState().draftInk!
+
+    await act(async () => firePointer(mounted.wrap, 'pointermove', { x: 1202, y: 40 }))
+    await act(async () => new Promise(resolve => requestAnimationFrame(resolve)))
+    const secondDraft = store.getInteractionState().draftInk!
+    expect(secondDraft.segments[0]).not.toBe(firstDraft.segments[0])
+
+    await act(async () => {
+      for (let index = 602; index <= 605; index++) {
         firePointer(mounted.wrap, 'pointermove', { x: index * 2, y: 40 })
       }
       firePointer(mounted.wrap, 'pointerup', { x: 1210, y: 40 })
@@ -195,10 +208,12 @@ describe('built-in ink tool', () => {
     const second = readInkData(nodes[1]!)!
     expect(first.points).toHaveLength(600)
     expect(second.points.length).toBeLessThanOrEqual(600)
-    const firstEnd = first.points.at(-1)!
-    const secondStart = second.points[0]!
-    expect(nodes[0]!.x + firstEnd[0]).toBeCloseTo(nodes[1]!.x + secondStart[0])
-    expect(nodes[0]!.y + firstEnd[1]).toBeCloseTo(nodes[1]!.y + secondStart[1])
+    for (let index = 0; index < 3; index++) {
+      const firstPoint = first.points[first.points.length - 3 + index]!
+      const secondPoint = second.points[index]!
+      expect(nodes[0]!.x + firstPoint[0]).toBeCloseTo(nodes[1]!.x + secondPoint[0])
+      expect(nodes[0]!.y + firstPoint[1]).toBeCloseTo(nodes[1]!.y + secondPoint[1])
+    }
 
     store.undo()
     expect(store.getAllNodes()).toHaveLength(0)

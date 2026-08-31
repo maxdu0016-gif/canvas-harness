@@ -30,6 +30,7 @@ const DEFAULT_INK_COLOR = '#1f2937'
 const DEFAULT_ERASER_RADIUS_SCREEN = 14
 const MIN_SAMPLE_DISTANCE_SCREEN = 1.5
 const MAX_INK_POINTS_PER_NODE = 600
+const INK_SEGMENT_OVERLAP_POINTS = 3
 
 type ValueOrFactory<T> = T | (() => T | undefined)
 type AddableNode = Omit<Node, 'z'> & { z?: number }
@@ -108,13 +109,10 @@ export const useInkTool = (
     const flushDraft = (): void => {
       draftRaf = 0
       if (activeMode === 'ink') {
-        const lastSegmentIndex = sampleSegments.length - 1
         store.setInteractionState({
           mode: 'creating-ink',
           draftInk: {
-            segments: sampleSegments.map((segment, index) =>
-              index === lastSegmentIndex ? [...segment] : segment,
-            ),
+            segments: sampleSegments.map(segment => [...segment]),
             size: activeSize,
             color: activeStyle.strokeColor ?? DEFAULT_INK_COLOR,
             opacity: activeStyle.opacity ?? 100,
@@ -165,7 +163,7 @@ export const useInkTool = (
           sample.pointerType === 'pen' ? Math.max(0.05, Math.min(1, sample.pressure || 0.5)) : 0.5
         const next = { ...world, pressure }
         if (segment.length >= MAX_INK_POINTS_PER_NODE && previous) {
-          sampleSegments.push([previous, next])
+          sampleSegments.push([...segment.slice(-INK_SEGMENT_OVERLAP_POINTS), next])
         } else {
           segment.push(next)
         }
