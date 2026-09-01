@@ -193,10 +193,19 @@ describe('built-in ink tool', () => {
     await act(async () => firePointer(mounted.wrap, 'pointermove', { x: 1202, y: 40 }))
     await act(async () => new Promise(resolve => requestAnimationFrame(resolve)))
     const secondDraft = store.getInteractionState().draftInk!
-    expect(secondDraft.segments[0]).not.toBe(firstDraft.segments[0])
+    expect(secondDraft.segments[0]).toBe(firstDraft.segments[0])
+    expect(secondDraft.segments[1]).not.toBe(firstDraft.segments[1])
+    expect(firstDraft.segments[1]).toHaveLength(4)
+
+    await act(async () => firePointer(mounted.wrap, 'pointermove', { x: 1204, y: 40 }))
+    await act(async () => new Promise(resolve => requestAnimationFrame(resolve)))
+    const thirdDraft = store.getInteractionState().draftInk!
+    expect(thirdDraft.segments[0]).toBe(secondDraft.segments[0])
+    expect(thirdDraft.segments[1]).not.toBe(secondDraft.segments[1])
+    expect(secondDraft.segments[1]).toHaveLength(5)
 
     await act(async () => {
-      for (let index = 602; index <= 605; index++) {
+      for (let index = 603; index <= 605; index++) {
         firePointer(mounted.wrap, 'pointermove', { x: index * 2, y: 40 })
       }
       firePointer(mounted.wrap, 'pointerup', { x: 1210, y: 40 })

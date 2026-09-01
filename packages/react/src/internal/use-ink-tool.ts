@@ -109,10 +109,13 @@ export const useInkTool = (
     const flushDraft = (): void => {
       draftRaf = 0
       if (activeMode === 'ink') {
+        const activeSegmentIndex = sampleSegments.length - 1
         store.setInteractionState({
           mode: 'creating-ink',
           draftInk: {
-            segments: sampleSegments.map(segment => [...segment]),
+            segments: sampleSegments.map((segment, index) =>
+              index === activeSegmentIndex ? [...segment] : segment,
+            ),
             size: activeSize,
             color: activeStyle.strokeColor ?? DEFAULT_INK_COLOR,
             opacity: activeStyle.opacity ?? 100,
@@ -163,6 +166,7 @@ export const useInkTool = (
           sample.pointerType === 'pen' ? Math.max(0.05, Math.min(1, sample.pressure || 0.5)) : 0.5
         const next = { ...world, pressure }
         if (segment.length >= MAX_INK_POINTS_PER_NODE && previous) {
+          Object.freeze(segment)
           sampleSegments.push([...segment.slice(-INK_SEGMENT_OVERLAP_POINTS), next])
         } else {
           segment.push(next)

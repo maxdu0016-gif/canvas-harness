@@ -15,7 +15,7 @@ import { computeEdgeGeometry, drawEdge } from '../edges'
 import { getPointAndTangentAtArcLength } from '../edges/arc-length'
 import { drawInkDraft, drawInkNodeWithOpacity } from '../ink'
 import type { NodeTypeDef, RenderEnv } from '../node-types'
-import { inflateRect, nodeAABB } from '../spatial'
+import { inflateRect, nodeAABB, rectsIntersect, unionRects } from '../spatial'
 import { type CanvasStore, type InteractionState, isMoving as isMovingState } from '../store'
 import {
   DEFAULT_HIGHLIGHT_COLOR,
@@ -804,11 +804,37 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     staticSurface.ctx.drawImage(cache.canvas, srcX, srcY, w, h, 0, 0, w, h)
   }
 
+  const mergeIntersectingRects = (rects: WorldRect[]): WorldRect[] => {
+    const merged: WorldRect[] = []
+    for (const rect of rects) {
+      let next = rect
+      let index = 0
+      while (index < merged.length) {
+        const existing = merged[index]
+        if (!existing || !rectsIntersect(next, existing)) {
+          index++
+          continue
+        }
+        const combined = unionRects([next, existing])
+        const separateArea = next.w * next.h + existing.w * existing.h
+        if (!combined || combined.w * combined.h > separateArea) {
+          index++
+          continue
+        }
+        next = combined
+        merged.splice(index, 1)
+        index = 0
+      }
+      merged.push(next)
+    }
+    return merged
+  }
+
   /**
-   * Repaints only the screen-space union of pending whole-stroke erasures.
-   * The offscreen scene cache remains complete and reusable; the live static
-   * surface gets a clipped scene pass with those ink ids omitted, while the
-   * interactive surface draws the same strokes at preview opacity.
+   * Repaints local patches around pending whole-stroke erasures. Intersecting
+   * stroke bounds share a patch, while distant erasures stay independent so
+   * they cannot turn into a viewport-sized repaint. The offscreen scene cache
+   * remains complete and reusable.
    */
   const paintEraserPreviewPatch = (camera: CameraState): void => {
     const interaction = store.getInteractionState()
@@ -816,47 +842,46 @@ export const createRenderer = (opts: RendererOptions): Renderer => {
     const excludedNodes = new Set(interaction.draftEraser.erasedIds)
     if (excludedNodes.size === 0) return
 
-    let patch: WorldRect | null = null
+    const strokePatches: WorldRect[] = []
     for (const id of excludedNodes) {
       const node = store.getNode(id)
       if (node?.type !== 'ink') continue
-      const bounds = inflateRect(nodeAABB(node), 2 / Math.max(0.01, camera.z))
-      if (!patch) {
-        patch = bounds
-        continue
-      }
-      const right = Math.max(patch.x + patch.w, bounds.x + bounds.w)
-      const bottom = Math.max(patch.y + patch.h, bounds.y + bounds.h)
-      patch.x = Math.min(patch.x, bounds.x)
-      patch.y = Math.min(patch.y, bounds.y)
-      patch.w = right - patch.x
-      patch.h = bottom - patch.y
+      strokePatches.push(inflateRect(nodeAABB(node), 2 / Math.max(0.01, camera.z)))
     }
-    if (!patch) return
+    if (strokePatches.length === 0) return
 
     const viewport = worldViewport(staticSurface, camera)
-    const x = Math.max(patch.x, viewport.x)
-    const y = Math.max(patch.y, viewport.y)
-    const right = Math.min(patch.x + patch.w, viewport.x + viewport.w)
-    const bottom = Math.min(patch.y + patch.h, viewport.y + viewport.h)
-    if (right <= x || bottom <= y) return
-    const clipped = { x, y, w: right - x, h: bottom - y }
-
     const ctx = staticSurface.ctx
     const scale = camera.z * staticSurface.dpr
-    const px = Math.floor((clipped.x - camera.x) * scale)
-    const py = Math.floor((clipped.y - camera.y) * scale)
-    const pr = Math.ceil((clipped.x + clipped.w - camera.x) * scale)
-    const pb = Math.ceil((clipped.y + clipped.h - camera.y) * scale)
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.beginPath()
-    ctx.rect(px, py, pr - px, pb - py)
-    ctx.clip()
-    ctx.clearRect(px, py, pr - px, pb - py)
-    applyCameraTransform(staticSurface, camera)
-    paintSceneBody(staticSurface, camera, clipped, false, excludedNodes)
-    ctx.restore()
+    for (const patch of mergeIntersectingRects(strokePatches)) {
+      const x = Math.max(patch.x, viewport.x)
+      const y = Math.max(patch.y, viewport.y)
+      const right = Math.min(patch.x + patch.w, viewport.x + viewport.w)
+      const bottom = Math.min(patch.y + patch.h, viewport.y + viewport.h)
+      if (right <= x || bottom <= y) continue
+
+      const px = Math.max(0, Math.floor((x - camera.x) * scale))
+      const py = Math.max(0, Math.floor((y - camera.y) * scale))
+      const pr = Math.min(staticSurface.canvas.width, Math.ceil((right - camera.x) * scale))
+      const pb = Math.min(staticSurface.canvas.height, Math.ceil((bottom - camera.y) * scale))
+      if (pr <= px || pb <= py) continue
+
+      const repaintWorld = {
+        x: camera.x + px / scale,
+        y: camera.y + py / scale,
+        w: (pr - px) / scale,
+        h: (pb - py) / scale,
+      }
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.beginPath()
+      ctx.rect(px, py, pr - px, pb - py)
+      ctx.clip()
+      ctx.clearRect(px, py, pr - px, pb - py)
+      applyCameraTransform(staticSurface, camera)
+      paintSceneBody(staticSurface, camera, repaintWorld, false, excludedNodes)
+      ctx.restore()
+    }
   }
 
   /**

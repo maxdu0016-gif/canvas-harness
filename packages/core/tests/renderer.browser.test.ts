@@ -4,9 +4,10 @@
  */
 import { describe, expect, test } from 'vitest'
 import { createInkGeometry } from '../src/ink'
+import { defineNode } from '../src/node-types'
 import { createRenderer } from '../src/render'
 import { createCanvasStore } from '../src/store'
-import { type Node, asClientId, asNodeId } from '../src/types'
+import { type Node, type NodeTypeDef, asClientId, asNodeId } from '../src/types'
 
 const makeCanvases = (w = 800, h = 600) => {
   const staticCanvas = document.createElement('canvas')
@@ -421,6 +422,96 @@ describe('Renderer (browser)', () => {
       .data[3]!
     expect(secondStaticAlpha).toBe(0)
     expect(secondPreviewAlpha).toBeGreaterThan(0)
+    expect(renderer.getLastDrawPath()).toBe('present')
+
+    renderer.dispose()
+    cleanup(staticCanvas, interactiveCanvas)
+  })
+
+  test('keeps distant eraser preview patches local and device-pixel sealed', async () => {
+    const { staticCanvas, interactiveCanvas } = makeCanvases(400, 140)
+    let middlePaints = 0
+    const repaintProbeDef: NodeTypeDef = defineNode({
+      type: 'eraser-repaint-probe',
+      renderCanvas: ctx => {
+        middlePaints++
+        ctx.fillStyle = '#ff00ff'
+        ctx.fillRect(0, 0, 20, 20)
+      },
+    })
+    const store = createCanvasStore({
+      clientId: asClientId('eraser-local-patches'),
+      nodeTypes: [repaintProbeDef],
+    })
+    const addInk = (id: string, startX: number, endX: number): ReturnType<typeof asNodeId> => {
+      const geometry = createInkGeometry(
+        [
+          { x: startX, y: 70, pressure: 0.5 },
+          { x: endX, y: 70, pressure: 0.5 },
+        ],
+        8,
+      )!
+      const nodeId = asNodeId(id)
+      store.addNode({
+        id: nodeId,
+        type: 'ink',
+        x: geometry.x,
+        y: geometry.y,
+        w: geometry.w,
+        h: geometry.h,
+        angle: 0,
+        groups: [],
+        style: { strokeColor: '#000000' },
+        data: { ink: geometry.ink },
+      })
+      return nodeId
+    }
+    const leftId = addInk('ink-preview-left', 20.3, 50.7)
+    const rightId = addInk('ink-preview-right', 349.4, 379.6)
+    store.addNode({
+      id: asNodeId('middle-repaint-probe'),
+      type: 'eraser-repaint-probe',
+      x: 190,
+      y: 60,
+      w: 20,
+      h: 20,
+      angle: 0,
+      z: 0,
+      groups: [],
+    })
+    store.setCamera({ x: 0.3, y: 0.2, z: 1.25 })
+    const renderer = createRenderer({
+      store,
+      staticCanvas,
+      interactiveCanvas,
+      width: 400,
+      height: 140,
+      background: { color: '#ffffff', pattern: 'none' },
+    })
+    renderer.start()
+    await waitFrame()
+    await waitFrame()
+    const paintsBeforePreview = middlePaints
+    expect(paintsBeforePreview).toBeGreaterThan(0)
+
+    store.setInteractionState({
+      mode: 'erasing-ink',
+      draftEraser: {
+        point: { x: 370, y: 70 },
+        radius: 14,
+        erasedIds: [leftId, rightId],
+      },
+    })
+    await waitFrame()
+    await waitFrame()
+
+    expect(middlePaints).toBe(paintsBeforePreview)
+    const pixels = readPixels(staticCanvas)
+    let nonOpaquePixels = 0
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] !== 255) nonOpaquePixels++
+    }
+    expect(nonOpaquePixels).toBe(0)
     expect(renderer.getLastDrawPath()).toBe('present')
 
     renderer.dispose()
